@@ -1,0 +1,63 @@
+name: Release Updater
+
+on:
+  push:
+    tags:
+      - "updater-v*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.24.x"
+          cache: true
+      - uses: sigstore/cosign-installer@v3.10.1
+
+      - name: Resolve version
+        id: release
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#updater-v}"
+          [[ "$GITHUB_REF_NAME" == "updater-v${version}" ]]
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build release artifacts
+        env:
+          COSIGN_BINARY: ${{ env.COSIGN_EXPERIMENTAL }}
+        shell: bash
+        run: |
+          COSIGN_BINARY="$(command -v cosign)" \
+            bash scripts/build-release.sh "${{ steps.release.outputs.version }}"
+
+      - name: Sign artifacts
+        shell: bash
+        run: |
+          find release-artifacts -maxdepth 1 -type f ! -name '*.sigstore.json' -print0 |
+            while IFS= read -r -d '' artifact; do
+              cosign sign-blob --yes --bundle "${artifact}.sigstore.json" "$artifact"
+            done
+
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: "release-artifacts/*"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" release-artifacts/* \
+            --verify-tag --latest=false --generate-notes \
+            --title "Updater ${{ steps.release.outputs.version }}"

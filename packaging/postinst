@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+
+getent group updater >/dev/null 2>&1 || groupadd --system updater
+install -d -o root -g updater -m 0750 /etc/exocortex /run/exocortex
+install -d -o root -g root -m 0700 /var/lib/updater
+systemctl daemon-reload
+systemctl enable --now updater.service

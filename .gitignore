@@ -1,0 +1,13 @@
+bin/
+dist/
+.build/
+release-artifacts/
+.tmp/
+.env
+.env.*
+!.env.example
+*.deb
+*.log
+*.pem
+*.key
+*.crt
