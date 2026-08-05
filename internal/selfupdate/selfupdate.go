@@ -21,6 +21,7 @@ import (
 	"updater/internal/api"
 	"updater/internal/config"
 	"updater/internal/kernel"
+	"updater/internal/signature"
 )
 
 type manifest struct {
@@ -141,14 +142,8 @@ func apply(runtime config.Runtime, repositoryURL string) error {
 		}
 	}
 	if !runtime.AllowUnsigned {
-		command := exec.CommandContext(ctx, "cosign", "verify-blob",
-			"--bundle", bundlePath,
-			"--certificate-identity-regexp", `^https://github.com/.+/.github/workflows/release.yml@refs/tags/.+$`,
-			"--certificate-oidc-issuer", "https://token.actions.githubusercontent.com",
-			manifestPath,
-		)
-		if output, err := command.CombinedOutput(); err != nil {
-			return fmt.Errorf("updater manifest verification failed: %s", strings.TrimSpace(string(output)))
+		if err := signature.VerifyBlob(ctx, manifestPath, bundlePath, filepath.Join(staging, ".sigstore-home")); err != nil {
+			return fmt.Errorf("updater manifest verification failed: %w", err)
 		}
 	}
 	var release manifest

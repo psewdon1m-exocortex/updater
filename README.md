@@ -79,7 +79,8 @@ installed.
 The worker retains at most 20 finished jobs/backups and removes finished data
 older than 30 days. The systemd journal is rate-limited to 200 messages per
 30 seconds. These host-wide defaults are declared in `updater.service`, not in
-a second service-specific `.env`.
+a second service-specific `.env`. Cosign receives a writable operation-local
+home under `/var/lib/updater`; `/root` remains protected by the systemd sandbox.
 
 A single container replacement can cause a short connection interruption.
 Running work in other services is not stopped; services that depend on Kernel

@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -20,6 +19,7 @@ import (
 	"time"
 
 	"updater/internal/model"
+	"updater/internal/signature"
 )
 
 var semver = regexp.MustCompile(`^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z.-]+))?$`)
@@ -114,7 +114,7 @@ func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stag
 		}
 	}
 	if !allowUnsigned {
-		if err := verifyCosign(ctx, manifestPath, bundlePath); err != nil {
+		if err := verifyCosign(ctx, manifestPath, bundlePath, filepath.Join(stagingDir, ".sigstore-home")); err != nil {
 			return Resolved{}, err
 		}
 	}
@@ -191,18 +191,9 @@ func download(ctx context.Context, client *http.Client, rawURL, path string, max
 	return file.Sync()
 }
 
-func verifyCosign(ctx context.Context, artifact, bundle string) error {
-	if _, err := exec.LookPath("cosign"); err != nil {
-		return errors.New("cosign is required to verify production releases")
-	}
-	command := exec.CommandContext(ctx, "cosign", "verify-blob",
-		"--bundle", bundle,
-		"--certificate-identity-regexp", `^https://github.com/.+/.github/workflows/release.yml@refs/tags/.+$`,
-		"--certificate-oidc-issuer", "https://token.actions.githubusercontent.com",
-		artifact,
-	)
-	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("Sigstore verification failed: %s", strings.TrimSpace(string(output)))
+func verifyCosign(ctx context.Context, artifact, bundle, home string) error {
+	if err := signature.VerifyBlob(ctx, artifact, bundle, home); err != nil {
+		return fmt.Errorf("Sigstore verification failed: %w", err)
 	}
 	return nil
 }
