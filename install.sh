@@ -47,12 +47,6 @@ if [ -z "$installed_version" ] ||
 elif [ "$candidate_version" != "$installed_version" ]; then
   echo "Keeping installed updater $installed_version; bundled $candidate_version is not newer."
 fi
-if [ -f "$script_dir/cosign-linux-amd64" ]; then
-  install -m 0755 "$script_dir/cosign-linux-amd64" /usr/bin/cosign
-elif ! command -v cosign >/dev/null 2>&1; then
-  echo "cosign is required; use the signed release bundle or install cosign first." >&2
-  exit 5
-fi
 install -m 0644 "$script_dir/systemd/updater.service" /etc/systemd/system/updater.service
 
 /usr/bin/updater register-head "$head_id" "$head_env"

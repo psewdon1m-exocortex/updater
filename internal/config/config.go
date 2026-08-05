@@ -20,7 +20,6 @@ type Runtime struct {
 	SocketPath        string
 	StateDir          string
 	RegistryPath      string
-	AllowUnsigned     bool
 	DryRun            bool
 	CommandTimeoutSec int
 	MaxRetainedJobs   int
@@ -54,7 +53,6 @@ func RuntimeFromEnv() Runtime {
 		SocketPath:        value("UPDATER_SOCKET_PATH", "/run/exocortex/updater.sock"),
 		StateDir:          value("UPDATER_STATE_DIR", "/var/lib/updater"),
 		RegistryPath:      value("UPDATER_HEADS_FILE", "/etc/exocortex/updater-heads.json"),
-		AllowUnsigned:     os.Getenv("UPDATER_ALLOW_UNSIGNED") == "true",
 		DryRun:            os.Getenv("UPDATER_DRY_RUN") == "true",
 		CommandTimeoutSec: intValue("UPDATER_COMMAND_TIMEOUT_SEC", 300),
 		MaxRetainedJobs:   intValue("UPDATER_MAX_RETAINED_JOBS", 20),

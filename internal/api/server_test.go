@@ -76,7 +76,7 @@ UPDATER_CONTROL_TOKEN=head-secret
 				"repositories": map[string]interface{}{"kernel": map[string]interface{}{"url": "https://github.com/example/platform"}},
 			}}, nil
 		},
-		func(context.Context, string, string, string, string, bool) (release.Resolved, error) {
+		func(context.Context, string, string, string, string) (release.Resolved, error) {
 			var resolved release.Resolved
 			resolved.Manifest.Service = "kernel"
 			resolved.Manifest.Version = "1.0.0"

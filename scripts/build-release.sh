@@ -26,12 +26,6 @@ binary_sha="$(sha256sum "$binary" | awk '{print $1}')"
   printf '%s  %s\n' "$binary_sha" updater-linux-amd64 > updater-linux-amd64.sha256
 )
 
-cosign_binary="${COSIGN_BINARY:-$(command -v cosign || true)}"
-if [[ -z "$cosign_binary" || ! -x "$cosign_binary" ]]; then
-  echo "A cosign binary is required to create release packages" >&2
-  exit 3
-fi
-
 debroot="$(mktemp -d)"
 stage="$(mktemp -d)"
 trap 'rm -rf "$debroot" "$stage"' EXIT
@@ -40,9 +34,8 @@ sed "s/^Version: .*/Version: $version/" \
   "$root/packaging/control" > "$debroot/DEBIAN/control"
 cp "$root/packaging/postinst" "$debroot/DEBIAN/postinst"
 cp "$binary" "$debroot/usr/bin/updater"
-cp "$cosign_binary" "$debroot/usr/bin/cosign"
 cp "$root/systemd/updater.service" "$debroot/lib/systemd/system/"
-chmod 0755 "$debroot/DEBIAN/postinst" "$debroot/usr/bin/updater" "$debroot/usr/bin/cosign"
+chmod 0755 "$debroot/DEBIAN/postinst" "$debroot/usr/bin/updater"
 dpkg-deb --build --root-owner-group \
   "$debroot" "$root/$output/updater_${version}_amd64.deb"
 (
@@ -54,8 +47,7 @@ mkdir -p "$stage/updater/systemd"
 cp "$binary" "$stage/updater/updater-linux-amd64"
 cp "$root/install.sh" "$stage/updater/install.sh"
 cp "$root/systemd/updater.service" "$stage/updater/systemd/"
-cp "$cosign_binary" "$stage/updater/cosign-linux-amd64"
-chmod 0755 "$stage/updater/"{install.sh,updater-linux-amd64,cosign-linux-amd64}
+chmod 0755 "$stage/updater/"{install.sh,updater-linux-amd64}
 tar -czf "$root/$output/updater-${version}-install.tar.gz" -C "$stage" updater
 (
   cd "$root/$output"

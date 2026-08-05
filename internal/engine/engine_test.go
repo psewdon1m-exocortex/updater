@@ -50,7 +50,6 @@ UPDATER_CONTROL_TOKEN=control-token-long-enough
 	runtime := config.Runtime{
 		StateDir:          dir,
 		RegistryPath:      filepath.Join(dir, "heads.json"),
-		AllowUnsigned:     true,
 		DryRun:            dryRun,
 		CommandTimeoutSec: 10,
 	}
@@ -68,7 +67,7 @@ UPDATER_CONTROL_TOKEN=control-token-long-enough
 				"repositories": map[string]interface{}{"kernel": map[string]interface{}{"url": "https://github.com/example/platform"}},
 			}}, nil
 		},
-		func(context.Context, string, string, string, string, bool) (release.Resolved, error) {
+		func(context.Context, string, string, string, string) (release.Resolved, error) {
 			var resolved release.Resolved
 			resolved.Manifest.SchemaVersion = 1
 			resolved.Manifest.Service = "kernel"

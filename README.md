@@ -1,6 +1,6 @@
 # updater
 
-`updater` is a local host tool for applying signed releases of Exocortex head
+`updater` is a local host tool for applying checksummed releases of Exocortex head
 services. It is deliberately not a central deployment service.
 
 Every VPS that hosts Kernel, Perimetr, or another supported head has its own
@@ -68,7 +68,8 @@ installed.
 ## Update guarantees
 
 - no arbitrary command, image or URL is accepted from a head;
-- the release manifest and compose archive must have a valid Sigstore bundle;
+- release metadata is accepted only from HTTPS GitHub repositories;
+- the compose archive must match the SHA-256 stored in the selected manifest;
 - the selected image is pulled by immutable digest;
 - the operator download and server-side backup are created before mutation;
 - existing persistent Docker volumes are preserved;
@@ -79,8 +80,7 @@ installed.
 The worker retains at most 20 finished jobs/backups and removes finished data
 older than 30 days. The systemd journal is rate-limited to 200 messages per
 30 seconds. These host-wide defaults are declared in `updater.service`, not in
-a second service-specific `.env`. Cosign receives a writable operation-local
-home under `/var/lib/updater`; `/root` remains protected by the systemd sandbox.
+a second service-specific `.env`.
 
 A single container replacement can cause a short connection interruption.
 Running work in other services is not stopped; services that depend on Kernel
@@ -97,6 +97,6 @@ updater update [--head <id>]
 updater version
 ```
 
-`updater update` is operator-triggered. It downloads the signed updater release,
+`updater update` is operator-triggered. It downloads the checksummed updater release,
 atomically replaces the binary, restarts the systemd unit, verifies the Unix
 socket health endpoint and restores the previous binary if verification fails.

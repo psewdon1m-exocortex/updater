@@ -44,7 +44,7 @@ type Engine struct {
 	store           *state.Store
 	runner          Runner
 	loadRegister    func(string, string, string, time.Duration) (kernel.Snapshot, error)
-	resolveRelease  func(context.Context, string, string, string, string, bool) (release.Resolved, error)
+	resolveRelease  func(context.Context, string, string, string, string) (release.Resolved, error)
 	checkHealthFn   func(context.Context, string) error
 	restoreBackupFn func(context.Context, config.HeadConfig, string) error
 	mu              sync.Mutex
@@ -80,7 +80,7 @@ func (e *Engine) SetTestHostOperations(
 
 func (e *Engine) SetTestDependencies(
 	loadRegister func(string, string, string, time.Duration) (kernel.Snapshot, error),
-	resolveRelease func(context.Context, string, string, string, string, bool) (release.Resolved, error),
+	resolveRelease func(context.Context, string, string, string, string) (release.Resolved, error),
 ) {
 	if loadRegister != nil {
 		e.loadRegister = loadRegister
@@ -202,7 +202,8 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 		return
 	}
 	stagingDir := filepath.Join(e.runtime.StateDir, "staging", job.ID)
-	resolved, err := e.resolveRelease(ctx, repositoryURL, job.Service, job.Version, stagingDir, e.runtime.AllowUnsigned)
+	defer os.RemoveAll(stagingDir)
+	resolved, err := e.resolveRelease(ctx, repositoryURL, job.Service, job.Version, stagingDir)
 	if err != nil {
 		fail(err)
 		return
@@ -216,7 +217,7 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 		return
 	}
 	job.Version = resolved.Manifest.Version
-	update("ARTIFACT_VERIFIED", "release manifest, signature and checksums verified")
+	update("ARTIFACT_VERIFIED", "release manifest, checksums and immutable image digest verified")
 	if e.runtime.DryRun {
 		update("COMPLETED", "dry-run completed without changing the host")
 		finished := time.Now().UTC()

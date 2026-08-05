@@ -21,7 +21,6 @@ import (
 	"updater/internal/api"
 	"updater/internal/config"
 	"updater/internal/kernel"
-	"updater/internal/signature"
 )
 
 type manifest struct {
@@ -123,28 +122,16 @@ func apply(runtime config.Runtime, repositoryURL string) error {
 		return ""
 	}
 	manifestURL := asset("updater-release.json")
-	bundleURL := asset("updater-release.json.sigstore.json")
-	if manifestURL == "" || (!runtime.AllowUnsigned && bundleURL == "") {
-		return errors.New("updater release manifest or signature is missing")
+	if manifestURL == "" {
+		return errors.New("updater release manifest is missing")
 	}
 	staging := filepath.Join(runtime.StateDir, "self-update")
 	if err := os.MkdirAll(staging, 0o700); err != nil {
 		return err
 	}
 	manifestPath := filepath.Join(staging, "updater-release.json")
-	bundlePath := manifestPath + ".sigstore.json"
 	if err := download(ctx, client, manifestURL, manifestPath, 2*1024*1024); err != nil {
 		return err
-	}
-	if bundleURL != "" {
-		if err := download(ctx, client, bundleURL, bundlePath, 8*1024*1024); err != nil {
-			return err
-		}
-	}
-	if !runtime.AllowUnsigned {
-		if err := signature.VerifyBlob(ctx, manifestPath, bundlePath, filepath.Join(staging, ".sigstore-home")); err != nil {
-			return fmt.Errorf("updater manifest verification failed: %w", err)
-		}
 	}
 	var release manifest
 	body, err := os.ReadFile(manifestPath)

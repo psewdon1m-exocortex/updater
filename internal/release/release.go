@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"updater/internal/model"
-	"updater/internal/signature"
 )
 
 var semver = regexp.MustCompile(`^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z.-]+))?$`)
@@ -38,11 +37,10 @@ type githubRelease struct {
 type Resolved struct {
 	Manifest     model.ReleaseManifest
 	ManifestPath string
-	BundlePath   string
 	ComposePath  string
 }
 
-func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stagingDir string, allowUnsigned bool) (Resolved, error) {
+func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stagingDir string) (Resolved, error) {
 	owner, repository, err := repositoryCoordinates(repositoryURL)
 	if err != nil {
 		return Resolved{}, err
@@ -98,9 +96,8 @@ func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stag
 	}
 	manifestName := service + "-release.json"
 	manifestURL := assetURL(manifestName)
-	bundleURL := assetURL(manifestName + ".sigstore.json")
-	if manifestURL == "" || (!allowUnsigned && bundleURL == "") {
-		return Resolved{}, errors.New("release manifest or Sigstore bundle is missing")
+	if manifestURL == "" {
+		return Resolved{}, errors.New("release manifest is missing")
 	}
 	if err := os.MkdirAll(stagingDir, 0o700); err != nil {
 		return Resolved{}, err
@@ -108,17 +105,6 @@ func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stag
 	manifestPath := filepath.Join(stagingDir, manifestName)
 	if err := download(ctx, client, manifestURL, manifestPath, 2*1024*1024); err != nil {
 		return Resolved{}, err
-	}
-	bundlePath := filepath.Join(stagingDir, manifestName+".sigstore.json")
-	if bundleURL != "" {
-		if err := download(ctx, client, bundleURL, bundlePath, 8*1024*1024); err != nil {
-			return Resolved{}, err
-		}
-	}
-	if !allowUnsigned {
-		if err := verifyCosign(ctx, manifestPath, bundlePath, filepath.Join(stagingDir, ".sigstore-home")); err != nil {
-			return Resolved{}, err
-		}
 	}
 	manifestBody, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -148,7 +134,7 @@ func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stag
 	if err := verifySHA256(composePath, manifest.ComposeBundle.SHA256); err != nil {
 		return Resolved{}, err
 	}
-	return Resolved{Manifest: manifest, ManifestPath: manifestPath, BundlePath: bundlePath, ComposePath: composePath}, nil
+	return Resolved{Manifest: manifest, ManifestPath: manifestPath, ComposePath: composePath}, nil
 }
 
 func repositoryCoordinates(raw string) (string, string, error) {
@@ -202,13 +188,6 @@ func download(ctx context.Context, client *http.Client, rawURL, path string, max
 		)
 	}
 	return file.Sync()
-}
-
-func verifyCosign(ctx context.Context, artifact, bundle, home string) error {
-	if err := signature.VerifyBlob(ctx, artifact, bundle, home); err != nil {
-		return fmt.Errorf("Sigstore verification failed: %w", err)
-	}
-	return nil
 }
 
 func verifySHA256(path, expected string) error {

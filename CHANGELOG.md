@@ -1,10 +1,18 @@
 # Changelog
 
+## 0.2.0
+
+- Simplify the early-stage release trust model to HTTPS, release identity,
+  SHA-256 checksums and immutable OCI image digests.
+- Remove the Cosign binary, Sigstore cache and detached-bundle requirement
+  from installation, head updates and Updater self-update.
+- Keep the 128 MiB head bundle limit and preserve the Unix-socket directory
+  across service restarts.
+
 ## 0.1.2
 
-- Accept signed head-service compose bundles up to 128 MiB. Kernel and Perimetr
-  bundles include the verified Updater/Cosign installer and are larger than the
-  former 32 MiB limit.
+- Accept head-service compose bundles up to 128 MiB. The former self-contained
+  installer bundles were larger than the original 32 MiB limit.
 - Preserve `/run/exocortex` across Updater service restarts so running head
   containers retain access to the recreated Unix socket.
 
