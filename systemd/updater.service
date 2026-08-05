@@ -21,6 +21,7 @@ Environment=HOME=/var/lib/updater
 LogRateLimitIntervalSec=30s
 LogRateLimitBurst=200
 RuntimeDirectory=exocortex
+RuntimeDirectoryPreserve=yes
 StateDirectory=updater
 NoNewPrivileges=true
 PrivateTmp=true

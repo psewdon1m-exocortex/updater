@@ -24,6 +24,8 @@ import (
 
 var semver = regexp.MustCompile(`^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z.-]+))?$`)
 
+const maxComposeBundleBytes int64 = 128 * 1024 * 1024
+
 type githubRelease struct {
 	TagName string `json:"tag_name"`
 	Draft   bool   `json:"draft"`
@@ -140,7 +142,7 @@ func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stag
 		return Resolved{}, errors.New("release manifest database_schema is invalid")
 	}
 	composePath := filepath.Join(stagingDir, service+"-compose.tar.gz")
-	if err := download(ctx, client, manifest.ComposeBundle.URL, composePath, 32*1024*1024); err != nil {
+	if err := download(ctx, client, manifest.ComposeBundle.URL, composePath, maxComposeBundleBytes); err != nil {
 		return Resolved{}, err
 	}
 	if err := verifySHA256(composePath, manifest.ComposeBundle.SHA256); err != nil {
@@ -176,6 +178,13 @@ func download(ctx context.Context, client *http.Client, rawURL, path string, max
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("release asset returned HTTP %d", response.StatusCode)
 	}
+	if response.ContentLength > maximum {
+		return fmt.Errorf(
+			"release asset %q exceeds the configured %d MiB size limit",
+			filepath.Base(path),
+			maximum/(1024*1024),
+		)
+	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
@@ -186,7 +195,11 @@ func download(ctx context.Context, client *http.Client, rawURL, path string, max
 		return err
 	}
 	if written > maximum {
-		return errors.New("release asset exceeds the configured size limit")
+		return fmt.Errorf(
+			"release asset %q exceeds the configured %d MiB size limit",
+			filepath.Base(path),
+			maximum/(1024*1024),
+		)
 	}
 	return file.Sync()
 }
