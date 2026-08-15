@@ -19,6 +19,10 @@ jobs:
         with:
           go-version: "1.24.x"
           cache: true
+      # Updater 0.1.x verifies detached Sigstore bundles before it can
+      # self-update. Keep publishing them so old production hosts have a
+      # cryptographically verified upgrade path to the current updater.
+      - uses: sigstore/cosign-installer@v3.10.1
       - name: Resolve version
         id: release
         shell: bash
@@ -33,6 +37,20 @@ jobs:
 
       - name: Build release artifacts
         run: bash scripts/build-release.sh "${{ steps.release.outputs.version }}"
+
+      - name: Sign backward-compatible release artifacts
+        shell: bash
+        run: |
+          find release-artifacts -maxdepth 1 -type f ! -name '*.sigstore.json' -print0 |
+            while IFS= read -r -d '' artifact; do
+              cosign sign-blob --yes --bundle "${artifact}.sigstore.json" "$artifact"
+            done
+
+          cosign verify-blob \
+            --bundle release-artifacts/updater-release.json.sigstore.json \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            release-artifacts/updater-release.json
 
       - uses: actions/attest-build-provenance@v3
         with:

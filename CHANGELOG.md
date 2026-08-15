@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Restore keyless Sigstore bundles for release artifacts so Updater 0.1.x can
+  cryptographically verify and install the current Updater before applying
+  releases that use the simplified 0.2.x trust model.
+
 ## 0.2.0
 
 - Simplify the early-stage release trust model to HTTPS, release identity,
