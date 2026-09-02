@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Detect head containers that retained an obsolete updater socket directory
+  bind mount and force-recreate only those services when the daemon starts.
+
 ## 0.2.1
 
 - Restore keyless Sigstore bundles for release artifacts so Updater 0.1.x can

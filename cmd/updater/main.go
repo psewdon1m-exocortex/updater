@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	"updater/internal/api"
 	"updater/internal/config"
 	"updater/internal/engine"
 	"updater/internal/selfupdate"
+	"updater/internal/socketmount"
 	"updater/internal/state"
 )
 
@@ -26,11 +30,28 @@ func main() {
 	case "serve":
 		store, err := state.New(runtime.StateDir)
 		exitIf(err)
+		repairer := socketmount.New(runtime)
 		server := api.Server{
 			Version: version,
 			Runtime: runtime,
 			Store:   store,
 			Engine:  engine.New(runtime, store, nil),
+			OnReady: func() {
+				go func() {
+					ctx, cancel := context.WithTimeout(
+						context.Background(),
+						time.Duration(runtime.CommandTimeoutSec)*time.Second,
+					)
+					defer cancel()
+					report := repairer.Repair(ctx)
+					if len(report.Recreated) > 0 {
+						fmt.Printf("recreated stale updater socket mounts for: %s\n", strings.Join(report.Recreated, ", "))
+					}
+					for _, warning := range report.Warnings {
+						fmt.Fprintf(os.Stderr, "updater socket mount repair warning: %s\n", warning)
+					}
+				}()
+			},
 		}
 		fmt.Printf("updater %s listening on %s\n", version, runtime.SocketPath)
 		exitIf(server.ListenAndServe())

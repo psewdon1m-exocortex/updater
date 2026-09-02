@@ -76,6 +76,8 @@ installed.
 - local and optional public health checks gate success;
 - a failed health check restores the previous image and imports the backup;
 - request IDs are idempotent and job state survives updater restarts.
+- daemon startup repairs a registered head container automatically when its
+  updater socket directory still points at an obsolete bind-mount inode.
 
 The worker retains at most 20 finished jobs/backups and removes finished data
 older than 30 days. The systemd journal is rate-limited to 200 messages per

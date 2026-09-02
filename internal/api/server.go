@@ -24,6 +24,7 @@ type Server struct {
 	Runtime config.Runtime
 	Store   *state.Store
 	Engine  *engine.Engine
+	OnReady func()
 }
 
 func (s Server) Handler() http.Handler {
@@ -146,6 +147,9 @@ func (s Server) ListenAndServe() error {
 	defer listener.Close()
 	if err := os.Chmod(s.Runtime.SocketPath, 0o660); err != nil {
 		return err
+	}
+	if s.OnReady != nil {
+		s.OnReady()
 	}
 	server := &http.Server{
 		Handler:           s.Handler(),
