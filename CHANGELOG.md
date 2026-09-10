@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- Bootstrap the host-wide Neptune Linux daemon from its checksummed release stream.
+- Redeem short-lived Saturn enrollment codes and register isolated project credentials with one command.
+- Add `updater neptune doctor` and permit rollback-safe Neptune binary replacement from the hardened service.
+- Add a token-isolated local bridge used by Neptune to apply an update queued in Saturn Synchronization; the endpoint can replace only the Neptune Linux component.
+
 ## 0.2.2
 
 - Detect head containers that retained an obsolete updater socket directory

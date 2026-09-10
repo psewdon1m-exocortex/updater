@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   push:
     branches:
       - main
@@ -34,3 +35,29 @@ jobs:
         env:
           CGO_ENABLED: "0"
         run: go build -o /tmp/updater ./cmd/updater
+
+  pre-push-gate:
+    name: Pre-push gate
+    needs: test
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Validate seven mandatory areas
+        env:
+          GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: >-
+          python3 scripts/pre-push-gate.py
+          --upstream-result "${{ needs.test.result }}"
+          --report .pre-push-gate-report.json
+      - name: Preserve gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: updater-pre-push-gate-${{ github.sha }}
+          path: .pre-push-gate-report.json
+          if-no-files-found: error
+          retention-days: 14

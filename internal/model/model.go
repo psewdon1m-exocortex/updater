@@ -26,6 +26,14 @@ type UpdateRequest struct {
 	Backup    Backup `json:"backup"`
 }
 
+type NeptuneInitializationRequest struct {
+	RequestID      string `json:"request_id"`
+	HeadID         string `json:"head_id"`
+	ProjectID      string `json:"project_id"`
+	ExportURL      string `json:"export_url"`
+	EnrollmentCode string `json:"enrollment_code"`
+}
+
 type Job struct {
 	ID                string     `json:"id"`
 	RequestID         string     `json:"request_id"`

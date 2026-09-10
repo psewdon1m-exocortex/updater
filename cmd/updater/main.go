@@ -1,15 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"updater/internal/api"
+	"updater/internal/component"
 	"updater/internal/config"
 	"updater/internal/engine"
 	"updater/internal/selfupdate"
@@ -17,7 +20,7 @@ import (
 	"updater/internal/state"
 )
 
-var version = "0.2.0"
+var version = "0.3.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -80,6 +83,8 @@ func main() {
 		}
 		exitIf(selfupdate.Run(runtime, headID))
 		fmt.Println("updater was updated successfully")
+	case "neptune":
+		handleNeptune(runtime, os.Args[2:])
 	case "help", "--help", "-h":
 		help()
 	default:
@@ -96,7 +101,38 @@ func help() {
 	fmt.Println("  updater status")
 	fmt.Println("  updater jobs")
 	fmt.Println("  updater update [--head <id>]")
+	fmt.Println("  updater neptune install --head <id>")
+	fmt.Println("  updater neptune enroll --head <id> --project <id> --export-url <loopback-url>")
+	fmt.Println("  updater neptune doctor")
 	fmt.Println("  updater version")
+}
+
+func handleNeptune(runtime config.Runtime, args []string) {
+	if len(args) == 1 && args[0] == "doctor" {
+		command := exec.Command("/usr/local/sbin/neptunectl", "doctor")
+		command.Stdout = os.Stdout
+		command.Stderr = os.Stderr
+		exitIf(command.Run())
+		return
+	}
+	if len(args) == 3 && args[0] == "install" && args[1] == "--head" {
+		selected, err := component.InstallLatestNeptune(runtime, args[2])
+		exitIf(err)
+		fmt.Printf("Neptune Linux %s is installed\n", selected)
+		return
+	}
+	if len(args) == 7 && args[0] == "enroll" && args[1] == "--head" && args[3] == "--project" && args[5] == "--export-url" {
+		if input, statErr := os.Stdin.Stat(); statErr == nil && input.Mode()&os.ModeCharDevice != 0 {
+			fmt.Fprint(os.Stderr, "Saturn one-time setup code: ")
+		}
+		code, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		exitIf(err)
+		result, err := component.EnrollNeptuneProject(runtime, args[2], args[4], args[6], strings.TrimSpace(code))
+		exitIf(err)
+		printJSON(result)
+		return
+	}
+	fatal("usage: updater neptune install --head <id> | enroll --head <id> --project <id> --export-url <loopback-url> | doctor")
 }
 
 func printJSON(value interface{}) {

@@ -17,6 +17,7 @@ Environment=UPDATER_HEADS_FILE=/etc/exocortex/updater-heads.json
 Environment=UPDATER_MAX_RETAINED_JOBS=20
 Environment=UPDATER_RETENTION_DAYS=30
 Environment=UPDATER_COMMAND_TIMEOUT_SEC=300
+Environment=NEPTUNE_UPDATER_TOKEN_FILE=/etc/neptune/updater-agent.token
 Environment=HOME=/var/lib/updater
 LogRateLimitIntervalSec=30s
 LogRateLimitBurst=200
@@ -27,7 +28,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/run/exocortex /var/lib/updater /etc/exocortex /opt/exocortex
+ReadWritePaths=/run/exocortex -/run/neptune /var/lib/updater -/var/lib/neptune /etc/exocortex -/etc/neptune /opt/exocortex -/opt/volt -/opt/vault -/usr/local/lib/neptune
 
 [Install]
 WantedBy=multi-user.target

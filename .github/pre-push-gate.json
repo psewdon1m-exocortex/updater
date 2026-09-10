@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "service": "updater",
+  "exposure_modes": [
+    "concealed"
+  ],
+  "profiles": {
+    "backup_restore": {
+      "applicable": false,
+      "reason": "Updater transports retained rollback backups but does not define application logical archives."
+    },
+    "service_update": {
+      "applicable": true,
+      "evidence": [
+        "README.md",
+        "internal/engine/engine_test.go",
+        "internal/selfupdate/selfupdate.go",
+        "internal/release/release_test.go"
+      ]
+    },
+    "internal_documentation": {
+      "applicable": false,
+      "reason": "Updater is a host daemon with no in-application Documentation view."
+    },
+    "technical_documentation": {
+      "applicable": true,
+      "evidence": [
+        "README.md",
+        "RELEASING.md"
+      ]
+    },
+    "security": {
+      "applicable": true,
+      "evidence": [
+        "README.md",
+        "internal/api/server_test.go",
+        "internal/config/config_test.go"
+      ]
+    },
+    "public_seo_geo": {
+      "applicable": false,
+      "reason": "Updater exposes no public/indexable web pages."
+    },
+    "private_concealed": {
+      "applicable": true,
+      "evidence": [
+        "README.md",
+        "internal/api/server_test.go",
+        "internal/socketmount/repair_test.go"
+      ]
+    }
+  }
+}

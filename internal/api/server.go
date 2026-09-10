@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"updater/internal/component"
 	"updater/internal/config"
 	"updater/internal/engine"
 	"updater/internal/model"
@@ -84,6 +85,167 @@ func (s Server) Handler() http.Handler {
 		}
 		writeJSON(w, http.StatusAccepted, job)
 	})
+	mux.HandleFunc("POST /v1/components/neptune-linux/update", func(w http.ResponseWriter, request *http.Request) {
+		request.Body = http.MaxBytesReader(w, request.Body, 64*1024)
+		var payload struct {
+			HeadID  string `json:"head_id"`
+			Version string `json:"version"`
+		}
+		decoder := json.NewDecoder(request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid Neptune update request: %w", err))
+			return
+		}
+		if err := s.authorize(request, payload.HeadID); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if err := component.UpdateNeptune(s.Runtime, payload.HeadID, payload.Version); err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(err.Error(), "already running") {
+				status = http.StatusConflict
+			}
+			writeError(w, status, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"updated": true, "version": payload.Version})
+	})
+	mux.HandleFunc("POST /v1/components/neptune-linux/initialize", func(w http.ResponseWriter, request *http.Request) {
+		request.Body = http.MaxBytesReader(w, request.Body, 64*1024)
+		var payload model.NeptuneInitializationRequest
+		decoder := json.NewDecoder(request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid Neptune initialization request: %w", err))
+			return
+		}
+		if err := s.authorize(request, payload.HeadID); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		job, err := component.StartNeptuneInitialization(s.Runtime, s.Store, payload)
+		if err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(err.Error(), "already running") {
+				status = http.StatusConflict
+			}
+			writeError(w, status, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, job)
+	})
+	mux.HandleFunc("GET /v1/components/neptune-linux/initializations/{id}", func(w http.ResponseWriter, request *http.Request) {
+		headID := request.URL.Query().Get("head_id")
+		if err := s.authorize(request, headID); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		job, ok := s.Store.Get(request.PathValue("id"))
+		if !ok || job.HeadID != headID || job.Service != "neptune-initialization" {
+			writeError(w, http.StatusNotFound, errors.New("Neptune initialization job not found"))
+			return
+		}
+		writeJSON(w, http.StatusOK, job)
+	})
+	mux.HandleFunc("POST /v1/agent/neptune-linux/update", func(w http.ResponseWriter, request *http.Request) {
+		request.Body = http.MaxBytesReader(w, request.Body, 64*1024)
+		var payload struct {
+			HeadID  string `json:"head_id"`
+			Version string `json:"version"`
+		}
+		decoder := json.NewDecoder(request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid Neptune agent update request: %w", err))
+			return
+		}
+		if err := authorizeNeptuneAgent(request); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if err := component.UpdateNeptune(s.Runtime, payload.HeadID, payload.Version); err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(err.Error(), "already running") {
+				status = http.StatusConflict
+			}
+			writeError(w, status, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"updated": true, "version": payload.Version})
+	})
+	mux.HandleFunc("POST /v1/components/neptune-linux/check", func(w http.ResponseWriter, request *http.Request) {
+		request.Body = http.MaxBytesReader(w, request.Body, 64*1024)
+		var payload struct {
+			HeadID         string `json:"head_id"`
+			CurrentVersion string `json:"current_version"`
+		}
+		decoder := json.NewDecoder(request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid Neptune check request: %w", err))
+			return
+		}
+		if err := s.authorize(request, payload.HeadID); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		result, err := component.CheckNeptune(s.Runtime, payload.HeadID, payload.CurrentVersion)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
+	mux.HandleFunc("POST /v1/components/gryphon-linux/update", func(w http.ResponseWriter, request *http.Request) {
+		request.Body = http.MaxBytesReader(w, request.Body, 64*1024)
+		var payload struct {
+			HeadID  string `json:"head_id"`
+			Version string `json:"version"`
+		}
+		decoder := json.NewDecoder(request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid Gryphon update request: %w", err))
+			return
+		}
+		if err := s.authorize(request, payload.HeadID); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		if err := component.UpdateGryphon(s.Runtime, payload.HeadID, payload.Version); err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(err.Error(), "already running") {
+				status = http.StatusConflict
+			}
+			writeError(w, status, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"updated": true, "version": payload.Version})
+	})
+	mux.HandleFunc("POST /v1/components/gryphon-linux/check", func(w http.ResponseWriter, request *http.Request) {
+		request.Body = http.MaxBytesReader(w, request.Body, 64*1024)
+		var payload struct {
+			HeadID         string `json:"head_id"`
+			CurrentVersion string `json:"current_version"`
+		}
+		decoder := json.NewDecoder(request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid Gryphon check request: %w", err))
+			return
+		}
+		if err := s.authorize(request, payload.HeadID); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		result, err := component.CheckGryphon(s.Runtime, payload.HeadID, payload.CurrentVersion)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
 	mux.HandleFunc("POST /v1/jobs/{id}/rollback", func(w http.ResponseWriter, request *http.Request) {
 		existing, ok := s.Store.Get(request.PathValue("id"))
 		if !ok {
@@ -113,6 +275,23 @@ func (s Server) authorize(request *http.Request, headID string) error {
 	if len(provided) != len(head.ControlToken) ||
 		subtle.ConstantTimeCompare([]byte(provided), []byte(head.ControlToken)) != 1 {
 		return errors.New("invalid updater control token")
+	}
+	return nil
+}
+
+func authorizeNeptuneAgent(request *http.Request) error {
+	path := strings.TrimSpace(os.Getenv("NEPTUNE_UPDATER_TOKEN_FILE"))
+	if path == "" {
+		path = "/etc/neptune/updater-agent.token"
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return errors.New("Neptune updater bridge is not configured")
+	}
+	expected := strings.TrimSpace(string(body))
+	provided := request.Header.Get("X-Neptune-Updater-Token")
+	if len(provided) != len(expected) || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
+		return errors.New("invalid Neptune updater bridge token")
 	}
 	return nil
 }
