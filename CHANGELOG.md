@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- Resolve Saturn releases exclusively from module-scoped
+  `saturn-vMAJOR.MINOR.PATCH` tags.
+- Preserve the existing signed manifest, immutable image, backup and rollback
+  verification boundaries while rejecting the legacy unscoped `v` tag.
+
 ## 0.3.0
 
 - Bootstrap the host-wide Neptune Linux daemon from its checksummed release stream.

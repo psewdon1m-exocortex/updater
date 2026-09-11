@@ -70,6 +70,10 @@ installed.
 
 ## Update guarantees
 
+Head releases use module-scoped tags. Saturn is resolved only from
+`saturn-vMAJOR.MINOR.PATCH`; a legacy repository-wide `vMAJOR.MINOR.PATCH` tag
+is not an installable Saturn release.
+
 - no arbitrary command, image or URL is accepted from a head;
 - release metadata is accepted only from HTTPS GitHub repositories;
 - the compose archive must match the SHA-256 stored in the selected manifest;

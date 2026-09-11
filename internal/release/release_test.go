@@ -30,6 +30,28 @@ func TestSupportsMinimum(t *testing.T) {
 	}
 }
 
+func TestVersionFromServiceTagUsesModuleScopedTags(t *testing.T) {
+	tests := []struct {
+		service string
+		tag     string
+		version string
+		ok      bool
+	}{
+		{service: "saturn", tag: "saturn-v0.1.0", version: "0.1.0", ok: true},
+		{service: "kernel", tag: "kernel-v2.3.4", version: "2.3.4", ok: true},
+		{service: "saturn", tag: "SATURN-v0.1.0", version: "0.1.0", ok: true},
+		{service: "saturn", tag: "v0.1.0", ok: false},
+		{service: "saturn", tag: "saturn-v0.1.0-beta.1", version: "0.1.0-beta.1", ok: true},
+		{service: "saturn", tag: "saturn-v01.0.0", ok: false},
+	}
+	for _, item := range tests {
+		version, ok := versionFromServiceTag(item.service, item.tag)
+		if version != item.version || ok != item.ok {
+			t.Fatalf("versionFromServiceTag(%q, %q) = (%q, %v), want (%q, %v)", item.service, item.tag, version, ok, item.version, item.ok)
+		}
+	}
+}
+
 func TestDownloadEnforcesConfiguredLimit(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", "11")

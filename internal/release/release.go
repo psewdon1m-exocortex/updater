@@ -22,7 +22,7 @@ import (
 	"updater/internal/releaseauth"
 )
 
-var semver = regexp.MustCompile(`^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z.-]+))?$`)
+var semver = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z.-]+))?$`)
 
 const maxComposeBundleBytes int64 = 128 * 1024 * 1024
 
@@ -68,23 +68,21 @@ func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stag
 	if err := json.Unmarshal(body, &releases); err != nil {
 		return Resolved{}, err
 	}
-	prefix := service + "-v"
-	if service == "saturn" {
-		prefix = "v"
-	}
 	candidates := make([]githubRelease, 0)
 	for _, item := range releases {
-		if item.Draft || !strings.HasPrefix(strings.ToLower(item.TagName), strings.ToLower(prefix)) {
+		version, matchesService := versionFromServiceTag(service, item.TagName)
+		if item.Draft || !matchesService {
 			continue
 		}
-		version := item.TagName[len(prefix):]
-		if !semver.MatchString(version) || (requestedVersion != "" && version != requestedVersion) {
+		if requestedVersion != "" && version != requestedVersion {
 			continue
 		}
 		candidates = append(candidates, item)
 	}
 	sort.Slice(candidates, func(i, j int) bool {
-		return compareVersion(candidates[i].TagName[len(prefix):], candidates[j].TagName[len(prefix):]) > 0
+		left, _ := versionFromServiceTag(service, candidates[i].TagName)
+		right, _ := versionFromServiceTag(service, candidates[j].TagName)
+		return compareVersion(left, right) > 0
 	})
 	if len(candidates) == 0 {
 		return Resolved{}, fmt.Errorf("no %s release matches version %q", service, requestedVersion)
@@ -121,7 +119,7 @@ func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stag
 	if err := json.Unmarshal(manifestBody, &manifest); err != nil {
 		return Resolved{}, fmt.Errorf("invalid release manifest: %w", err)
 	}
-	version := selected.TagName[len(prefix):]
+	version, _ := versionFromServiceTag(service, selected.TagName)
 	if manifest.SchemaVersion != 1 || manifest.Service != service || manifest.Version != version {
 		return Resolved{}, errors.New("release manifest identity does not match the selected release")
 	}
@@ -145,6 +143,18 @@ func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stag
 		return Resolved{}, err
 	}
 	return Resolved{Manifest: manifest, ManifestPath: manifestPath, ComposePath: composePath}, nil
+}
+
+func versionFromServiceTag(service, tag string) (string, bool) {
+	prefix := service + "-v"
+	if len(tag) <= len(prefix) || !strings.EqualFold(tag[:len(prefix)], prefix) {
+		return "", false
+	}
+	version := tag[len(prefix):]
+	if !semver.MatchString(version) {
+		return "", false
+	}
+	return version, true
 }
 
 func repositoryCoordinates(raw string) (string, string, error) {
