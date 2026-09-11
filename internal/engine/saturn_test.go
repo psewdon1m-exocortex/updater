@@ -42,6 +42,7 @@ func TestSaturnRollsBackBothImagesAndDatabaseBeforeReadiness(t *testing.T) {
 	}
 	runner := &saturnRunner{}
 	instance.runner = runner
+	instance.SetTestBackupOwnership(func(string, int, int) error { return nil })
 	instance.SetTestDependencies(func(string, string, string, time.Duration) (kernel.Snapshot, error) {
 		return kernel.Snapshot{Values: map[string]interface{}{"repositories": map[string]interface{}{"saturn": map[string]interface{}{"url": "https://github.com/example/saturn"}}}}, nil
 	}, func(context.Context, string, string, string, string) (release.Resolved, error) {

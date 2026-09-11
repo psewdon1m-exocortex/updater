@@ -47,6 +47,7 @@ type Engine struct {
 	resolveRelease   func(context.Context, string, string, string, string) (release.Resolved, error)
 	checkHealthFn    func(context.Context, string) error
 	restoreBackupFn  func(context.Context, config.HeadConfig, string) error
+	chownBackupFn    func(string, int, int) error
 	mu               sync.Mutex
 	busy             bool
 	operationRelease func()
@@ -64,6 +65,13 @@ func New(runtime config.Runtime, store *state.Store, runner Runner) *Engine {
 		resolveRelease:  release.Resolve,
 		checkHealthFn:   checkHealth,
 		restoreBackupFn: restoreBackup,
+		chownBackupFn:   os.Chown,
+	}
+}
+
+func (e *Engine) SetTestBackupOwnership(chown func(string, int, int) error) {
+	if chown != nil {
+		e.chownBackupFn = chown
 	}
 }
 
@@ -366,7 +374,7 @@ func (e *Engine) rollback(ctx context.Context, job *model.Job, head config.HeadC
 	if head.Service == "saturn" {
 		base := []string{"compose", "--env-file", head.EnvFile, "-f", filepath.Join(head.ProjectDir, head.ComposeFile)}
 		// The enclosing host backup directory remains root-only; only the bind-mounted file is readable by Saturn's fixed runtime uid.
-		if err := os.Chown(job.BackupPath, 1000, 1000); err != nil {
+		if err := e.chownBackupFn(job.BackupPath, 1000, 1000); err != nil {
 			return err
 		}
 		if _, err := e.runner.Run(ctx, "docker", append(append([]string{}, base...), "stop", "api", "worker"), nil, head.ProjectDir); err != nil {
