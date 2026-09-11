@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- Restart Saturn's loopback-only `web` service during update and rollback;
+  public TLS and ingress remain owned by the server-managed Nginx.
+
 ## 0.4.0
 
 - Resolve Saturn releases exclusively from module-scoped

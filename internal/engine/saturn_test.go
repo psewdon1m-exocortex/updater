@@ -82,8 +82,8 @@ func TestSaturnRollsBackBothImagesAndDatabaseBeforeReadiness(t *testing.T) {
 			calls := strings.Join(runner.calls, "\n")
 			runner.mu.Unlock()
 			restore := strings.Index(calls, "recovery-cli.mjs restore-replace")
-			finalStart := strings.LastIndex(calls, "up -d --no-deps api worker edge")
-			if restore < 0 || restore > finalStart || !strings.Contains(calls, "pull ghcr.io/example/web@sha256:new") {
+			finalStart := strings.LastIndex(calls, "up -d --no-deps api worker web")
+			if restore < 0 || restore > finalStart || !strings.Contains(calls, "stop api worker web") || strings.Contains(calls, " api worker edge") || !strings.Contains(calls, "pull ghcr.io/example/web@sha256:new") {
 				t.Fatal("paired replacement/restore order was not executed")
 			}
 			return

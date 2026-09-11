@@ -336,13 +336,13 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 func (e *Engine) composeUp(ctx context.Context, head config.HeadConfig) ([]byte, error) {
 	if head.Service == "saturn" {
 		base := []string{"compose", "--env-file", head.EnvFile, "-f", filepath.Join(head.ProjectDir, head.ComposeFile)}
-		if output, err := e.runner.Run(ctx, "docker", append(append([]string{}, base...), "stop", "api", "worker"), nil, head.ProjectDir); err != nil {
+		if output, err := e.runner.Run(ctx, "docker", append(append([]string{}, base...), "stop", "api", "worker", "web"), nil, head.ProjectDir); err != nil {
 			return output, err
 		}
 		if output, err := e.runner.Run(ctx, "docker", append(append([]string{}, base...), "run", "--rm", "--no-deps", "migrate"), nil, head.ProjectDir); err != nil {
 			return output, err
 		}
-		return e.runner.Run(ctx, "docker", append(base, "up", "-d", "--no-deps", "api", "worker", "edge"), nil, head.ProjectDir)
+		return e.runner.Run(ctx, "docker", append(base, "up", "-d", "--no-deps", "api", "worker", "web"), nil, head.ProjectDir)
 	}
 	return e.runner.Run(ctx, "docker", []string{
 		"compose", "--env-file", head.EnvFile,
@@ -377,7 +377,7 @@ func (e *Engine) rollback(ctx context.Context, job *model.Job, head config.HeadC
 		if err := e.chownBackupFn(job.BackupPath, 1000, 1000); err != nil {
 			return err
 		}
-		if _, err := e.runner.Run(ctx, "docker", append(append([]string{}, base...), "stop", "api", "worker"), nil, head.ProjectDir); err != nil {
+		if _, err := e.runner.Run(ctx, "docker", append(append([]string{}, base...), "stop", "api", "worker", "web"), nil, head.ProjectDir); err != nil {
 			return err
 		}
 		// Restore before starting the older application against the database.

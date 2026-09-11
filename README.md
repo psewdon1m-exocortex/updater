@@ -72,7 +72,9 @@ installed.
 
 Head releases use module-scoped tags. Saturn is resolved only from
 `saturn-vMAJOR.MINOR.PATCH`; a legacy repository-wide `vMAJOR.MINOR.PATCH` tag
-is not an installable Saturn release.
+is not an installable Saturn release. Saturn updates replace the `api`,
+`worker` and loopback-only `web` services; Updater never starts or mutates the
+server-managed Nginx.
 
 - no arbitrary command, image or URL is accepted from a head;
 - release metadata is accepted only from HTTPS GitHub repositories;
