@@ -44,6 +44,10 @@ jobs:
       - name: Build release artifacts
         run: bash scripts/build-release.sh "${{ steps.release.outputs.version }}"
 
+      - name: Sign trusted release manifest
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: node scripts/sign-release.mjs release-artifacts/updater-release.json
       - name: Sign backward-compatible release artifacts
         shell: bash
         run: |

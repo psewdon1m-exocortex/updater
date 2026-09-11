@@ -30,15 +30,43 @@ type Server struct {
 
 func (s Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	s.lifecycle(mux)
+	s.recovery(mux)
+	mux.HandleFunc("POST /v1/releases/check", func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		var input struct {
+			HeadID string `json:"head_id"`
+		}
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if err := s.authorize(r, input.HeadID); err != nil {
+			writeError(w, 401, err)
+			return
+		}
+		result, err := s.Engine.Check(input.HeadID)
+		if err != nil {
+			writeError(w, 502, err)
+			return
+		}
+		writeJSON(w, 200, result)
+	})
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status": "ok", "service": "updater", "version": s.Version, "busy": s.Engine.Busy(),
+			"status": "ok", "service": "updater", "version": s.Version, "busy": s.Engine.Busy() || s.Store.HasActiveOperation(),
 		})
 	})
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"service": "updater", "version": s.Version})
 	})
-	mux.HandleFunc("GET /v1/services", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /v1/services", func(w http.ResponseWriter, request *http.Request) {
+		if err := s.authorize(request, request.URL.Query().Get("head_id")); err != nil {
+			writeError(w, 401, err)
+			return
+		}
 		registry, err := config.LoadRegistry(s.Runtime.RegistryPath)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
@@ -46,17 +74,36 @@ func (s Server) Handler() http.Handler {
 		}
 		items := make([]map[string]string, 0, len(registry.Heads))
 		for id, head := range registry.Heads {
-			items = append(items, map[string]string{"id": id, "env_file": head.EnvFile})
+			_ = head
+			if id == request.URL.Query().Get("head_id") {
+				items = append(items, map[string]string{"id": id})
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"services": items})
 	})
-	mux.HandleFunc("GET /v1/jobs", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"jobs": s.Store.List()})
+	mux.HandleFunc("GET /v1/jobs", func(w http.ResponseWriter, request *http.Request) {
+		headID := request.URL.Query().Get("head_id")
+		if err := s.authorize(request, headID); err != nil {
+			writeError(w, 401, err)
+			return
+		}
+		jobs := []model.Job{}
+		for _, job := range s.Store.List() {
+			if job.HeadID == headID {
+				latest, _ := s.Store.Get(job.ID)
+				jobs = append(jobs, latest)
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"jobs": jobs})
 	})
 	mux.HandleFunc("GET /v1/jobs/{id}", func(w http.ResponseWriter, request *http.Request) {
 		job, ok := s.Store.Get(request.PathValue("id"))
 		if !ok {
 			writeError(w, http.StatusNotFound, errors.New("job not found"))
+			return
+		}
+		if err := s.authorize(request, job.HeadID); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, job)
@@ -101,7 +148,7 @@ func (s Server) Handler() http.Handler {
 			writeError(w, http.StatusUnauthorized, err)
 			return
 		}
-		if err := component.UpdateNeptune(s.Runtime, payload.HeadID, payload.Version); err != nil {
+		if err := s.exclusive(func() error { return component.UpdateNeptune(s.Runtime, payload.HeadID, payload.Version) }); err != nil {
 			status := http.StatusBadRequest
 			if strings.Contains(err.Error(), "already running") {
 				status = http.StatusConflict
@@ -164,7 +211,7 @@ func (s Server) Handler() http.Handler {
 			writeError(w, http.StatusUnauthorized, err)
 			return
 		}
-		if err := component.UpdateNeptune(s.Runtime, payload.HeadID, payload.Version); err != nil {
+		if err := s.exclusive(func() error { return component.UpdateNeptune(s.Runtime, payload.HeadID, payload.Version) }); err != nil {
 			status := http.StatusBadRequest
 			if strings.Contains(err.Error(), "already running") {
 				status = http.StatusConflict
@@ -213,7 +260,7 @@ func (s Server) Handler() http.Handler {
 			writeError(w, http.StatusUnauthorized, err)
 			return
 		}
-		if err := component.UpdateGryphon(s.Runtime, payload.HeadID, payload.Version); err != nil {
+		if err := s.exclusive(func() error { return component.UpdateGryphon(s.Runtime, payload.HeadID, payload.Version) }); err != nil {
 			status := http.StatusBadRequest
 			if strings.Contains(err.Error(), "already running") {
 				status = http.StatusConflict
@@ -342,6 +389,7 @@ func (s Server) ListenAndServe() error {
 func withLocalHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet, noimageindex")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		if request.Host != "updater.local" && request.Host != "" {
 			writeError(w, http.StatusBadRequest, errors.New("invalid updater host"))

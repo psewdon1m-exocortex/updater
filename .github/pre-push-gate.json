@@ -2,51 +2,54 @@
   "version": 1,
   "service": "updater",
   "exposure_modes": [
+    "private",
     "concealed"
   ],
   "profiles": {
     "backup_restore": {
-      "applicable": false,
-      "reason": "Updater transports retained rollback backups but does not define application logical archives."
+      "applicable": true,
+      "evidence": [
+        "DEPLOYMENT_READINESS.md",
+        "internal/hostrecovery/archive.go",
+        "internal/hostrecovery/transaction.go"
+      ]
     },
     "service_update": {
       "applicable": true,
       "evidence": [
-        "README.md",
-        "internal/engine/engine_test.go",
+        "DEPLOYMENT_READINESS.md",
         "internal/selfupdate/selfupdate.go",
-        "internal/release/release_test.go"
+        "internal/selfupdate/installer_test.go"
       ]
     },
     "internal_documentation": {
       "applicable": false,
-      "reason": "Updater is a host daemon with no in-application Documentation view."
+      "reason": "This helper has no independent web Documentation view; connected head interfaces provide operator workflows, and the repository ships technical instructions."
     },
     "technical_documentation": {
       "applicable": true,
       "evidence": [
         "README.md",
-        "RELEASING.md"
+        "DEPLOYMENT_READINESS.md"
       ]
     },
     "security": {
       "applicable": true,
       "evidence": [
-        "README.md",
-        "internal/api/server_test.go",
-        "internal/config/config_test.go"
+        "internal/state/operation_test.go",
+        "internal/api/access_test.go"
       ]
     },
     "public_seo_geo": {
       "applicable": false,
-      "reason": "Updater exposes no public/indexable web pages."
+      "reason": "This service has no deliberately public/indexable content; crawler exclusion is checked in the private/concealed profile."
     },
     "private_concealed": {
       "applicable": true,
       "evidence": [
-        "README.md",
-        "internal/api/server_test.go",
-        "internal/socketmount/repair_test.go"
+        "DEPLOYMENT_READINESS.md",
+        "internal/state/operation_test.go",
+        "internal/api/access_test.go"
       ]
     }
   }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"sync"
 	"time"
@@ -16,6 +17,21 @@ type Store struct {
 	dir  string
 	mu   sync.Mutex
 	jobs map[string]model.Job
+}
+
+var safeJobID = regexp.MustCompile(`^[A-Za-z0-9-]{1,128}$`)
+
+func normalizeCompletion(job model.Job) model.Job {
+	switch job.State {
+	case "COMPLETED", "ROLLED_BACK", "FAILED", "ROLLBACK_FAILED":
+		if job.FinishedAt == nil {
+			finished := job.UpdatedAt
+			job.FinishedAt = &finished
+		}
+	default:
+		job.FinishedAt = nil
+	}
+	return job
 }
 
 func New(dir string) (*Store, error) {
@@ -31,30 +47,61 @@ func New(dir string) (*Store, error) {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() || info.Size() > 65536 {
+			continue
+		}
 		body, err := os.ReadFile(filepath.Join(dir, "jobs", entry.Name()))
 		if err != nil {
 			continue
 		}
 		var job model.Job
-		if json.Unmarshal(body, &job) == nil && job.ID != "" {
-			store.jobs[job.ID] = job
+		if json.Unmarshal(body, &job) == nil && safeJobID.MatchString(job.ID) && entry.Name() == job.ID+".json" {
+			store.jobs[job.ID] = normalizeCompletion(job)
 		}
 	}
 	return store, nil
 }
 
 func (s *Store) Save(job model.Job) error {
+	job = normalizeCompletion(job)
+	if !safeJobID.MatchString(job.ID) {
+		return errors.New("invalid job ID")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	body, err := json.MarshalIndent(job, "", "  ")
 	if err != nil {
 		return err
 	}
+	if len(body) > 65536 {
+		return errors.New("job exceeds persistence limit")
+	}
 	path := filepath.Join(s.dir, "jobs", job.ID+".json")
-	if err := os.WriteFile(path+".tmp", append(body, '\n'), 0o600); err != nil {
+	file, err := os.OpenFile(path+".tmp", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
 		return err
 	}
+	if _, err = file.Write(append(body, '\n')); err == nil {
+		err = file.Sync()
+	}
+	closeErr := file.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
 	if err := os.Rename(path+".tmp", path); err != nil {
+		return err
+	}
+	directory, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	err = directory.Sync()
+	_ = directory.Close()
+	if err != nil {
 		return err
 	}
 	s.jobs[job.ID] = job
@@ -64,6 +111,16 @@ func (s *Store) Save(job model.Job) error {
 func (s *Store) Get(id string) (model.Job, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !safeJobID.MatchString(id) {
+		return model.Job{}, false
+	}
+	// A supervised self-update completes in another process after daemon restart.
+	if body, err := os.ReadFile(filepath.Join(s.dir, "jobs", id+".json")); err == nil && len(body) <= 65536 {
+		var latest model.Job
+		if json.Unmarshal(body, &latest) == nil && latest.ID == id {
+			s.jobs[id] = normalizeCompletion(latest)
+		}
+	}
 	job, ok := s.jobs[id]
 	return job, ok
 }

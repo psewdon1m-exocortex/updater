@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"updater/internal/model"
+	"updater/internal/releaseauth"
 )
 
 var semver = regexp.MustCompile(`^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z.-]+))?$`)
@@ -68,6 +69,9 @@ func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stag
 		return Resolved{}, err
 	}
 	prefix := service + "-v"
+	if service == "saturn" {
+		prefix = "v"
+	}
 	candidates := make([]githubRelease, 0)
 	for _, item := range releases {
 		if item.Draft || !strings.HasPrefix(strings.ToLower(item.TagName), strings.ToLower(prefix)) {
@@ -107,6 +111,9 @@ func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stag
 		return Resolved{}, err
 	}
 	manifestBody, err := os.ReadFile(manifestPath)
+	if err := releaseauth.VerifyDownloaded(ctx, client, manifestPath, assetURL(manifestName+".sig.json"), service); err != nil {
+		return Resolved{}, err
+	}
 	if err != nil {
 		return Resolved{}, err
 	}
@@ -126,6 +133,9 @@ func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stag
 	}
 	if manifest.DatabaseSchema < 1 {
 		return Resolved{}, errors.New("release manifest database_schema is invalid")
+	}
+	if service == "saturn" && !regexp.MustCompile(`^[a-zA-Z0-9._:/-]+@sha256:[a-f0-9]{64}$`).MatchString(manifest.WebImage) {
+		return Resolved{}, errors.New("Saturn web image must be pinned to a digest")
 	}
 	composePath := filepath.Join(stagingDir, service+"-compose.tar.gz")
 	if err := download(ctx, client, manifest.ComposeBundle.URL, composePath, maxComposeBundleBytes); err != nil {

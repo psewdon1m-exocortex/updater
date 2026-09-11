@@ -22,6 +22,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"updater/internal/releaseauth"
 
 	"updater/internal/config"
 	"updater/internal/kernel"
@@ -122,6 +123,14 @@ func InstallLatestNeptune(runtimeConfig config.Runtime, headID string) (string, 
 			candidate := strings.TrimSpace(string(output))
 			if neptuneVersion.MatchString(strings.TrimSuffix(candidate, "-dev")) || neptuneVersion.MatchString(candidate) {
 				current = candidate
+				healthContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := checkNeptuneProject(healthContext, "", ""); err != nil {
+					if err = restartNeptune(healthContext); err != nil {
+						return "", err
+					}
+				}
+				return current, nil
 			}
 		}
 	}
@@ -185,7 +194,7 @@ func UpdateNeptune(runtimeConfig config.Runtime, headID, version string) error {
 		return errors.New("a Neptune update is already running")
 	}
 	defer neptuneUpdateLock.Unlock()
-	lock, err := os.OpenFile("/run/lock/neptune-update.lock", os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := os.OpenFile("/run/exocortex/neptune-update.lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}
@@ -240,6 +249,9 @@ func UpdateNeptune(runtimeConfig config.Runtime, headID, version string) error {
 	}
 	var manifest neptuneManifest
 	body, err := os.ReadFile(manifestPath)
+	if err := releaseauth.VerifyDownloaded(ctx, client, manifestPath, releaseAsset(release, manifestName+".sig.json"), "neptune"); err != nil {
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -286,9 +298,12 @@ func UpdateNeptune(runtimeConfig config.Runtime, headID, version string) error {
 		_ = os.Remove(previous)
 		return nil
 	} else {
-		_ = os.Rename(previous, neptuneBinary)
-		_, _ = exec.Command("systemctl", "restart", "neptune.service").CombinedOutput()
-		return err
+		if restoreErr := os.Rename(previous, neptuneBinary); restoreErr != nil {
+			return errors.Join(err, restoreErr)
+		}
+		rollbackContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return errors.Join(err, restartNeptune(rollbackContext))
 	}
 }
 
@@ -535,6 +550,14 @@ func copyFile(source, target string, mode os.FileMode) error {
 		return err
 	}
 	if _, err := io.Copy(output, input); err != nil {
+		_ = output.Close()
+		return err
+	}
+	if err := output.Chmod(mode); err != nil {
+		_ = output.Close()
+		return err
+	}
+	if err := output.Sync(); err != nil {
 		_ = output.Close()
 		return err
 	}

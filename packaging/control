@@ -3,7 +3,7 @@ Version: 0.0.0
 Section: admin
 Priority: optional
 Architecture: amd64
-Depends: docker-ce-cli | docker.io, ca-certificates, curl
+Depends: docker-ce-cli | docker.io, ca-certificates, curl, util-linux, passwd
 Maintainer: Exocortex
 Description: Local update worker for Exocortex head services
  The updater applies signed, immutable service releases on one VPS through

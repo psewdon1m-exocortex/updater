@@ -21,6 +21,8 @@ import (
 	"updater/internal/api"
 	"updater/internal/config"
 	"updater/internal/kernel"
+	"updater/internal/release"
+	"updater/internal/releaseauth"
 )
 
 type manifest struct {
@@ -31,6 +33,10 @@ type manifest struct {
 		URL    string `json:"url"`
 		SHA256 string `json:"sha256"`
 	} `json:"binary"`
+	Installer struct {
+		URL    string `json:"url"`
+		SHA256 string `json:"sha256"`
+	} `json:"installer"`
 }
 
 type githubRelease struct {
@@ -72,10 +78,10 @@ func Run(runtime config.Runtime, headID string) error {
 	if err != nil {
 		return err
 	}
-	return apply(runtime, repositoryURL)
+	return apply(runtime, repositoryURL, head)
 }
 
-func apply(runtime config.Runtime, repositoryURL string) error {
+func apply(runtime config.Runtime, repositoryURL string, head config.HeadConfig) error {
 	parsed, err := url.Parse(repositoryURL)
 	if err != nil || parsed.Scheme != "https" || strings.ToLower(parsed.Hostname()) != "github.com" {
 		return errors.New("repositories.updater.url must identify an HTTPS GitHub repository")
@@ -129,12 +135,16 @@ func apply(runtime config.Runtime, repositoryURL string) error {
 	if err := os.MkdirAll(staging, 0o700); err != nil {
 		return err
 	}
+	defer os.RemoveAll(staging)
 	manifestPath := filepath.Join(staging, "updater-release.json")
 	if err := download(ctx, client, manifestURL, manifestPath, 2*1024*1024); err != nil {
 		return err
 	}
 	var release manifest
 	body, err := os.ReadFile(manifestPath)
+	if err := releaseauth.VerifyDownloaded(ctx, client, manifestPath, asset("updater-release.json.sig.json"), "updater"); err != nil {
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -145,6 +155,12 @@ func apply(runtime config.Runtime, repositoryURL string) error {
 	if release.SchemaVersion != 1 || release.Service != "updater" || release.Version != expectedVersion {
 		return errors.New("updater release manifest identity mismatch")
 	}
+	if release.Version == runtime.UpdaterVersion {
+		return nil
+	}
+	if !supportsUpgrade(release.Version, runtime.UpdaterVersion) {
+		return errors.New("refusing an Updater downgrade")
+	}
 	binaryPath := filepath.Join(staging, "updater.new")
 	if err := download(ctx, client, release.Binary.URL, binaryPath, 64*1024*1024); err != nil {
 		return err
@@ -152,17 +168,37 @@ func apply(runtime config.Runtime, repositoryURL string) error {
 	if err := verify(binaryPath, release.Binary.SHA256); err != nil {
 		return err
 	}
+	installerArchive := filepath.Join(staging, "installer.tar.gz")
+	if err := download(ctx, client, release.Installer.URL, installerArchive, 80*1024*1024); err != nil {
+		return err
+	}
+	if err := verify(installerArchive, release.Installer.SHA256); err != nil {
+		return err
+	}
+	installerRoot, err := extractInstallation(installerArchive, filepath.Join(staging, "installer"), release.Binary.SHA256)
+	if err != nil {
+		return err
+	}
+	if err := os.Chmod(binaryPath, 0755); err != nil {
+		return err
+	}
+	if output, err := exec.CommandContext(ctx, binaryPath, "version").Output(); err != nil || strings.TrimSpace(string(output)) != release.Version {
+		return errors.New("signed Updater binary version does not match its manifest")
+	}
 	if runtime.DryRun {
 		return nil
 	}
-	executable, err := os.Executable()
+	restoreUnit, err := prepareHost(ctx, installerRoot, head)
 	if err != nil {
 		return err
 	}
-	executable, err = filepath.EvalSymlinks(executable)
-	if err != nil {
-		return err
-	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = restoreUnit()
+		}
+	}()
+	executable := "/usr/local/lib/updater/updater"
 	previous := executable + ".previous"
 	if err := copyFile(executable, previous, 0o755); err != nil {
 		return err
@@ -170,24 +206,34 @@ func apply(runtime config.Runtime, repositoryURL string) error {
 	if err := os.Chmod(binaryPath, 0o755); err != nil {
 		return err
 	}
-	if err := os.Rename(binaryPath, executable); err != nil {
+	candidate := executable + ".new"
+	if err := copyFile(binaryPath, candidate, 0o755); err != nil {
 		return err
 	}
+	defer os.Remove(candidate)
+	if err := os.Rename(candidate, executable); err != nil {
+		return err
+	}
+	rollback := func() error {
+		return errors.Join(os.Rename(previous, executable), restoreUnit(), exec.Command("systemctl", "restart", "updater.service").Run())
+	}
 	if output, err := exec.CommandContext(ctx, "systemctl", "restart", "updater.service").CombinedOutput(); err != nil {
-		_ = os.Rename(previous, executable)
-		return fmt.Errorf("updater restart failed: %s", strings.TrimSpace(string(output)))
+		return errors.Join(fmt.Errorf("updater restart failed: %s", strings.TrimSpace(string(output))), rollback())
 	}
 	for attempt := 0; attempt < 20; attempt++ {
 		var status map[string]interface{}
-		if api.Request(runtime.SocketPath, http.MethodGet, "/v1/health", nil, &status) == nil {
+		if api.Request(runtime.SocketPath, http.MethodGet, "/v1/health", nil, &status) == nil && status["version"] == release.Version {
 			_ = os.Remove(previous)
+			committed = true
 			return nil
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	_ = os.Rename(previous, executable)
-	_, _ = exec.Command("systemctl", "restart", "updater.service").CombinedOutput()
-	return errors.New("updated updater did not become healthy; previous binary restored")
+	return errors.Join(errors.New("updated Updater did not become healthy; restoring previous binary and unit"), rollback())
+}
+
+func supportsUpgrade(candidate, current string) bool {
+	return release.SupportsMinimum(candidate, current)
 }
 
 func download(ctx context.Context, client *http.Client, rawURL, path string, maximum int64) error {

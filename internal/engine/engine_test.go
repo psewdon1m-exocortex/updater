@@ -36,6 +36,7 @@ func testEngine(t *testing.T, dryRun bool) (*Engine, config.Runtime, *state.Stor
 KERNEL_SERVICE_TOKEN=service-token-long-enough
 UPDATER_SERVICE_ID=kernel
 UPDATER_COMPOSE_PROJECT_DIR=/opt/kernel
+UPDATER_COMPOSE_FILE=compose.production.yaml
 UPDATER_COMPOSE_SERVICE=kernel
 UPDATER_CONTAINER_NAME=exocortex-kernel
 UPDATER_IMAGE_VARIABLE=KERNEL_IMAGE
@@ -45,6 +46,12 @@ UPDATER_LOCAL_HEALTH_URL=http://127.0.0.1:18180/api/health
 UPDATER_CONTROL_TOKEN=control-token-long-enough
 `
 	if err := os.WriteFile(envPath, []byte(env), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(envPath, []byte(strings.ReplaceAll(env, "/opt/kernel", dir)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "compose.production.yaml"), []byte("services: {kernel: {image: old}}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	runtime := config.Runtime{
@@ -61,6 +68,15 @@ UPDATER_CONTROL_TOKEN=control-token-long-enough
 		t.Fatal(err)
 	}
 	instance := New(runtime, store, nil)
+	t.Cleanup(func() {
+		deadline := time.Now().Add(3 * time.Second)
+		for instance.Busy() && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		if instance.Busy() {
+			t.Error("engine did not release its host operation")
+		}
+	})
 	instance.SetTestDependencies(
 		func(string, string, string, time.Duration) (kernel.Snapshot, error) {
 			return kernel.Snapshot{Values: map[string]interface{}{
@@ -69,6 +85,7 @@ UPDATER_CONTROL_TOKEN=control-token-long-enough
 		},
 		func(context.Context, string, string, string, string) (release.Resolved, error) {
 			var resolved release.Resolved
+			resolved.ComposePath = deploymentFixture(t, "kernel")
 			resolved.Manifest.SchemaVersion = 1
 			resolved.Manifest.Service = "kernel"
 			resolved.Manifest.Version = "1.2.0"

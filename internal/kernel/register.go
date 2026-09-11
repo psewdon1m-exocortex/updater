@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var voltReference = regexp.MustCompile(`(?i)^volt://[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+var voltReference = regexp.MustCompile(`(?i)^volt://[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/[1-5]$`)
 
 type Snapshot struct {
 	Schema   string                 `json:"schema"`

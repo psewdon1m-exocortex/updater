@@ -40,15 +40,16 @@ func (OSRunner) Run(ctx context.Context, name string, args, environment []string
 }
 
 type Engine struct {
-	runtime         config.Runtime
-	store           *state.Store
-	runner          Runner
-	loadRegister    func(string, string, string, time.Duration) (kernel.Snapshot, error)
-	resolveRelease  func(context.Context, string, string, string, string) (release.Resolved, error)
-	checkHealthFn   func(context.Context, string) error
-	restoreBackupFn func(context.Context, config.HeadConfig, string) error
-	mu              sync.Mutex
-	busy            bool
+	runtime          config.Runtime
+	store            *state.Store
+	runner           Runner
+	loadRegister     func(string, string, string, time.Duration) (kernel.Snapshot, error)
+	resolveRelease   func(context.Context, string, string, string, string) (release.Resolved, error)
+	checkHealthFn    func(context.Context, string) error
+	restoreBackupFn  func(context.Context, config.HeadConfig, string) error
+	mu               sync.Mutex
+	busy             bool
+	operationRelease func()
 }
 
 func New(runtime config.Runtime, store *state.Store, runner Runner) *Engine {
@@ -95,6 +96,9 @@ func (e *Engine) Start(request model.UpdateRequest) (model.Job, error) {
 		return model.Job{}, errors.New("request_id, head_id and service are required")
 	}
 	if previous, ok := e.store.ByRequestID(request.RequestID); ok {
+		if previous.HeadID != request.HeadID || previous.Service != request.Service {
+			return model.Job{}, errors.New("request id is already in use")
+		}
 		return previous, nil
 	}
 	head, err := config.LoadHead(e.runtime, request.HeadID)
@@ -108,12 +112,18 @@ func (e *Engine) Start(request model.UpdateRequest) (model.Job, error) {
 	if err != nil {
 		return model.Job{}, err
 	}
+	releaseOperation, err := e.store.BeginOperation("")
+	if err != nil {
+		return model.Job{}, err
+	}
 	e.mu.Lock()
 	if e.busy {
 		e.mu.Unlock()
+		releaseOperation()
 		return model.Job{}, errors.New("another update is already running on this VPS")
 	}
 	e.busy = true
+	e.operationRelease = releaseOperation
 	e.mu.Unlock()
 
 	now := time.Now().UTC()
@@ -176,17 +186,20 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 		_ = e.store.Save(job)
 	}
 	fail := func(err error) {
-		update("FAILED", err.Error())
-		if job.PreviousImage != "" {
-			update("ROLLING_BACK", err.Error())
-			if rollbackErr := e.rollback(ctx, &job, head); rollbackErr != nil {
-				update("ROLLBACK_FAILED", rollbackErr.Error())
+		finalState, message := "FAILED", err.Error()
+		if job.PreviousImage != "" && job.MutationStarted {
+			update("ROLLING_BACK", message)
+			rollbackCtx, cancelRollback := context.WithTimeout(context.Background(), time.Duration(e.runtime.CommandTimeoutSec)*time.Second)
+			rollbackErr := e.rollback(rollbackCtx, &job, head)
+			cancelRollback()
+			if rollbackErr != nil {
+				finalState, message = "ROLLBACK_FAILED", rollbackErr.Error()
 			} else {
-				update("ROLLED_BACK", err.Error())
+				finalState = "ROLLED_BACK"
 			}
 		}
 		finished := time.Now().UTC()
-		job.FinishedAt = &finished
+		job.State, job.Message, job.UpdatedAt, job.FinishedAt = finalState, message, finished, &finished
 		_ = e.store.Save(job)
 		e.prune()
 	}
@@ -217,9 +230,14 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 		return
 	}
 	job.Version = resolved.Manifest.Version
+	deployment, err := readDeployment(resolved.ComposePath, job.Service)
+	if err != nil {
+		fail(err)
+		return
+	}
 	update("ARTIFACT_VERIFIED", "release manifest, checksums and immutable image digest verified")
 	if e.runtime.DryRun {
-		update("COMPLETED", "dry-run completed without changing the host")
+		job.State, job.Message = "COMPLETED", "dry-run completed without changing the host"
 		finished := time.Now().UTC()
 		job.FinishedAt = &finished
 		_ = e.store.Save(job)
@@ -235,15 +253,50 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 		_ = e.store.Save(job)
 	}
 	nextImage := resolved.Manifest.Image.Reference + "@" + resolved.Manifest.Image.Digest
+	if job.Service == "saturn" {
+		values, err := config.ParseEnvFile(head.EnvFile)
+		if err != nil {
+			fail(err)
+			return
+		}
+		job.PreviousWebImage = values["VAULT_WEB_IMAGE"]
+		if job.PreviousWebImage == "" {
+			fail(errors.New("previous Saturn web image is unavailable"))
+			return
+		}
+		_ = e.store.Save(job)
+		if _, err := e.runner.Run(ctx, "docker", []string{"pull", resolved.Manifest.WebImage}, nil, head.ProjectDir); err != nil {
+			fail(errors.New("Saturn web image pull failed"))
+			return
+		}
+	}
 	update("PULLING", "pulling immutable image")
 	if output, err := e.runner.Run(ctx, "docker", []string{"pull", nextImage}, nil, head.ProjectDir); err != nil {
 		fail(fmt.Errorf("image pull failed: %s", strings.TrimSpace(string(output))))
 		return
 	}
-	if err := setEnvValues(head.EnvFile, map[string]string{
+	values := map[string]string{
 		head.ImageVariable:   nextImage,
 		head.VersionVariable: resolved.Manifest.Version,
-	}); err != nil {
+	}
+	if job.Service == "saturn" {
+		values["VAULT_WEB_IMAGE"] = resolved.Manifest.WebImage
+	}
+	job.DeploymentSnapshot = filepath.Join(filepath.Dir(job.BackupPath), "deployment.json")
+	if err := snapshotDeployment(head, deployment, job.DeploymentSnapshot); err != nil {
+		fail(err)
+		return
+	}
+	job.MutationStarted = true
+	if err := e.store.Save(job); err != nil {
+		fail(err)
+		return
+	}
+	if err := applyDeployment(head, deployment); err != nil {
+		fail(err)
+		return
+	}
+	if err := setEnvValues(head.EnvFile, values); err != nil {
 		fail(err)
 		return
 	}
@@ -265,7 +318,7 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 	}
 	job.InstalledImage = nextImage
 	job.InstalledVersion = resolved.Manifest.Version
-	update("COMPLETED", "update completed")
+	job.State, job.Message = "COMPLETED", "update completed"
 	finished := time.Now().UTC()
 	job.FinishedAt = &finished
 	_ = e.store.Save(job)
@@ -273,6 +326,16 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 }
 
 func (e *Engine) composeUp(ctx context.Context, head config.HeadConfig) ([]byte, error) {
+	if head.Service == "saturn" {
+		base := []string{"compose", "--env-file", head.EnvFile, "-f", filepath.Join(head.ProjectDir, head.ComposeFile)}
+		if output, err := e.runner.Run(ctx, "docker", append(append([]string{}, base...), "stop", "api", "worker"), nil, head.ProjectDir); err != nil {
+			return output, err
+		}
+		if output, err := e.runner.Run(ctx, "docker", append(append([]string{}, base...), "run", "--rm", "--no-deps", "migrate"), nil, head.ProjectDir); err != nil {
+			return output, err
+		}
+		return e.runner.Run(ctx, "docker", append(base, "up", "-d", "--no-deps", "api", "worker", "edge"), nil, head.ProjectDir)
+	}
 	return e.runner.Run(ctx, "docker", []string{
 		"compose", "--env-file", head.EnvFile,
 		"-f", filepath.Join(head.ProjectDir, head.ComposeFile),
@@ -281,17 +344,39 @@ func (e *Engine) composeUp(ctx context.Context, head config.HeadConfig) ([]byte,
 }
 
 func (e *Engine) rollback(ctx context.Context, job *model.Job, head config.HeadConfig) error {
+	if err := restoreDeployment(head, job.DeploymentSnapshot); err != nil {
+		return err
+	}
 	if job.PreviousImage == "" {
 		return errors.New("previous image is unavailable")
 	}
 	if job.PreviousVersion == "" {
 		return errors.New("previous service version is unavailable")
 	}
-	if err := setEnvValues(head.EnvFile, map[string]string{
+	values := map[string]string{
 		head.ImageVariable:   job.PreviousImage,
 		head.VersionVariable: job.PreviousVersion,
-	}); err != nil {
+	}
+	if head.Service == "saturn" {
+		values["VAULT_WEB_IMAGE"] = job.PreviousWebImage
+	}
+	if err := setEnvValues(head.EnvFile, values); err != nil {
 		return err
+	}
+	if head.Service == "saturn" {
+		base := []string{"compose", "--env-file", head.EnvFile, "-f", filepath.Join(head.ProjectDir, head.ComposeFile)}
+		// The enclosing host backup directory remains root-only; only the bind-mounted file is readable by Saturn's fixed runtime uid.
+		if err := os.Chown(job.BackupPath, 1000, 1000); err != nil {
+			return err
+		}
+		if _, err := e.runner.Run(ctx, "docker", append(append([]string{}, base...), "stop", "api", "worker"), nil, head.ProjectDir); err != nil {
+			return err
+		}
+		// Restore before starting the older application against the database.
+		args := append(base, "run", "--rm", "--no-deps", "-v", job.BackupPath+":/recovery/rollback.zip:ro", "migrate", "node", "/app/scripts/recovery-cli.mjs", "restore-replace", "/recovery/rollback.zip", "--confirm-replace")
+		if _, err := e.runner.Run(ctx, "docker", args, nil, head.ProjectDir); err != nil {
+			return errors.New("Saturn snapshot rollback failed")
+		}
 	}
 	if output, err := e.composeUp(ctx, head); err != nil {
 		return fmt.Errorf("previous container failed to start: %s", strings.TrimSpace(string(output)))
@@ -299,7 +384,7 @@ func (e *Engine) rollback(ctx context.Context, job *model.Job, head config.HeadC
 	if err := e.checkHealthFn(ctx, head.LocalHealthURL); err != nil {
 		return err
 	}
-	if head.RestoreURL != "" {
+	if head.RestoreURL != "" && head.Service != "saturn" {
 		if err := e.restoreBackupFn(ctx, head, job.BackupPath); err != nil {
 			return err
 		}
@@ -319,14 +404,21 @@ func (e *Engine) Rollback(jobID string) (model.Job, error) {
 	if err != nil {
 		return model.Job{}, err
 	}
+	releaseOperation, err := e.store.BeginOperation("")
+	if err != nil {
+		return model.Job{}, err
+	}
 	e.mu.Lock()
 	if e.busy {
 		e.mu.Unlock()
+		releaseOperation()
 		return model.Job{}, errors.New("another update is already running on this VPS")
 	}
 	e.busy = true
+	e.operationRelease = releaseOperation
 	e.mu.Unlock()
 	job.State = "ROLLING_BACK"
+	job.FinishedAt = nil
 	job.UpdatedAt = time.Now().UTC()
 	_ = e.store.Save(job)
 	go func() {
@@ -358,6 +450,10 @@ func (e *Engine) prune() {
 
 func (e *Engine) releaseLock() {
 	e.mu.Lock()
+	if e.operationRelease != nil {
+		e.operationRelease()
+		e.operationRelease = nil
+	}
 	e.busy = false
 	e.mu.Unlock()
 }

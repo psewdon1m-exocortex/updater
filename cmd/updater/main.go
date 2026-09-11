@@ -15,12 +15,13 @@ import (
 	"updater/internal/component"
 	"updater/internal/config"
 	"updater/internal/engine"
+	"updater/internal/hostrecovery"
 	"updater/internal/selfupdate"
 	"updater/internal/socketmount"
 	"updater/internal/state"
 )
 
-var version = "0.3.0"
+var version = "0.4.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -31,8 +32,16 @@ func main() {
 	runtime.UpdaterVersion = version
 	switch os.Args[1] {
 	case "serve":
+		if hostrecovery.PendingHostRecovery() {
+			if exec.Command("systemctl", "is-active", "--quiet", "exocortex-host-recovery.service").Run() == nil {
+				fatal("host recovery is still active")
+			}
+			exitIf(exec.Command("systemd-run", "--unit=exocortex-host-recovery-resume", "--collect", "--wait", "--property=Type=exec", "--property=RuntimeMaxSec=600", "/usr/bin/updater", "host-recovery-resume").Run())
+		}
 		store, err := state.New(runtime.StateDir)
 		exitIf(err)
+		exitIf(store.ReconcileInterrupted(activeSupervisor))
+		exitIf(store.CleanupRecoveryStaging())
 		repairer := socketmount.New(runtime)
 		server := api.Server{
 			Version: version,
@@ -40,6 +49,16 @@ func main() {
 			Store:   store,
 			Engine:  engine.New(runtime, store, nil),
 			OnReady: func() {
+				go func() {
+					// Reconcile after the socket is available and allow manual jobs
+					// to take the same host lock. Missing bootstrap data is retried.
+					time.Sleep(5 * time.Second)
+					for {
+						component.ReconcileHostHelpers(runtime, store)
+						time.Sleep(time.Minute)
+					}
+				}()
+				go monitorSupervisors(store)
 				go func() {
 					ctx, cancel := context.WithTimeout(
 						context.Background(),
@@ -69,11 +88,39 @@ func main() {
 		exitIf(api.Request(runtime.SocketPath, http.MethodGet, "/v1/health", nil, &result))
 		printJSON(result)
 	case "jobs":
-		var result map[string]interface{}
-		exitIf(api.Request(runtime.SocketPath, http.MethodGet, "/v1/jobs", nil, &result))
-		printJSON(result)
+		store, err := state.New(runtime.StateDir)
+		exitIf(err)
+		printJSON(store.List())
 	case "version":
 		fmt.Println(version)
+	case "host-recovery-resume":
+		exitIf(hostrecovery.ResumeInterruptedHost())
+	case "host-recovery":
+		release := acquireHostOperation(runtime, "")
+		defer release()
+		if len(os.Args) != 6 || os.Args[4] != "--key-file" || (os.Args[2] != "export" && os.Args[2] != "restore") {
+			fatal("usage: updater host-recovery export|restore <archive> --key-file <protected-passphrase-file>")
+		}
+		key, err := os.ReadFile(os.Args[5])
+		exitIf(err)
+		if os.Args[2] == "export" {
+			archive, err := hostrecovery.Export(strings.TrimSpace(string(key)))
+			clear(key)
+			exitIf(err)
+			exitIf(os.WriteFile(os.Args[3], archive, 0600))
+		} else {
+			archive, err := os.ReadFile(os.Args[3])
+			exitIf(err)
+			err = hostrecovery.Restore(archive, strings.TrimSpace(string(key)))
+			clear(key)
+			exitIf(err)
+		}
+		fmt.Println("Helper recovery operation completed")
+	case "host-recovery-job":
+		if len(os.Args) != 3 {
+			fatal("host recovery job ID is required")
+		}
+		exitIf(runSupervised(runtime, os.Args[2], "host-recovery"))
 	case "update":
 		headID := ""
 		if len(os.Args) == 4 && os.Args[2] == "--head" {
@@ -81,10 +128,26 @@ func main() {
 		} else if len(os.Args) != 2 {
 			fatal("usage: updater update [--head <id>]")
 		}
+		release := acquireHostOperation(runtime, "")
+		defer release()
 		exitIf(selfupdate.Run(runtime, headID))
 		fmt.Println("updater was updated successfully")
 	case "neptune":
 		handleNeptune(runtime, os.Args[2:])
+	case "gryphon":
+		if len(os.Args) != 5 || os.Args[2] != "install" || os.Args[3] != "--head" {
+			fatal("usage: updater gryphon install --head <id>")
+		}
+		release := acquireHostOperation(runtime, "")
+		defer release()
+		selected, err := component.InitializeGryphon(runtime, os.Args[4])
+		exitIf(err)
+		fmt.Printf("Gryphon %s is installed\n", selected)
+	case "self-update-job":
+		if len(os.Args) != 3 {
+			fatal("self-update job ID is required")
+		}
+		exitIf(runSupervised(runtime, os.Args[2], "updater-self-update"))
 	case "help", "--help", "-h":
 		help()
 	default:
@@ -116,6 +179,8 @@ func handleNeptune(runtime config.Runtime, args []string) {
 		return
 	}
 	if len(args) == 3 && args[0] == "install" && args[1] == "--head" {
+		release := acquireHostOperation(runtime, "")
+		defer release()
 		selected, err := component.InstallLatestNeptune(runtime, args[2])
 		exitIf(err)
 		fmt.Printf("Neptune Linux %s is installed\n", selected)
@@ -127,6 +192,8 @@ func handleNeptune(runtime config.Runtime, args []string) {
 		}
 		code, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		exitIf(err)
+		release := acquireHostOperation(runtime, "")
+		defer release()
 		result, err := component.EnrollNeptuneProject(runtime, args[2], args[4], args[6], strings.TrimSpace(code))
 		exitIf(err)
 		printJSON(result)

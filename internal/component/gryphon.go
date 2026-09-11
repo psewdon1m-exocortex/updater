@@ -19,6 +19,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"updater/internal/releaseauth"
 
 	"updater/internal/config"
 	"updater/internal/kernel"
@@ -106,7 +107,7 @@ func UpdateGryphon(runtimeConfig config.Runtime, headID, version string) error {
 		return errors.New("a Gryphon update is already running")
 	}
 	defer gryphonUpdateLock.Unlock()
-	lock, err := os.OpenFile("/run/lock/gryphon-update.lock", os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := os.OpenFile("/run/exocortex/gryphon-update.lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}
@@ -115,12 +116,12 @@ func UpdateGryphon(runtimeConfig config.Runtime, headID, version string) error {
 		return errors.New("a Gryphon update is already running")
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	if !gryphonInstallationComplete() {
-		return errors.New("Gryphon Linux must be installed before it can be updated")
-	}
-	installedVersion, err := installedGryphonVersion()
-	if err != nil {
-		return err
+	installedVersion := "0.0.0"
+	if gryphonInstallationComplete() {
+		installedVersion, err = installedGryphonVersion()
+		if err != nil {
+			return err
+		}
 	}
 	check, err := CheckGryphon(runtimeConfig, headID, installedVersion)
 	if err != nil {
@@ -173,6 +174,9 @@ func UpdateGryphon(runtimeConfig config.Runtime, headID, version string) error {
 		return err
 	}
 	body, err := os.ReadFile(manifestPath)
+	if err := releaseauth.VerifyDownloaded(ctx, client, manifestPath, releaseAsset(release, manifestName+".sig.json"), "gryphon"); err != nil {
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -188,7 +192,7 @@ func UpdateGryphon(runtimeConfig config.Runtime, headID, version string) error {
 		return errors.New("Gryphon release artifact is missing")
 	}
 	archivePath := filepath.Join(staging, "gryphon.tar.gz")
-	if err := download(ctx, client, artifactURL, archivePath, 64*1024*1024); err != nil {
+	if err := download(ctx, client, artifactURL, archivePath, 128*1024*1024); err != nil {
 		return err
 	}
 	if err := verifySHA256(archivePath, manifest.SHA256); err != nil {
@@ -200,6 +204,9 @@ func UpdateGryphon(runtimeConfig config.Runtime, headID, version string) error {
 	}
 	if runtimeConfig.DryRun {
 		return nil
+	}
+	if !gryphonInstallationComplete() {
+		return installFreshGryphon(ctx, extracted, head)
 	}
 	return replaceGryphon(ctx, extracted)
 }
@@ -268,7 +275,7 @@ func extractGryphonApp(archivePath, target, version string) error {
 			return errors.New("Gryphon release contains too many entries")
 		}
 		name := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(header.Name)), "./")
-		allowed := name == "package.json" || strings.HasPrefix(name, "dist/")
+		allowed := name == "package.json" || name == "runtime/node" || strings.HasPrefix(name, "dist/") || name == "packaging/linux/install.sh" || name == "packaging/linux/gryphon.service" || name == "packaging/linux/gryphonctl"
 		if !allowed {
 			continue
 		}
@@ -278,18 +285,26 @@ func extractGryphonApp(archivePath, target, version string) error {
 			}
 			continue
 		}
-		if header.Typeflag != tar.TypeReg || header.Size < 1 || header.Size > 8*1024*1024 {
+		maximum := int64(8 * 1024 * 1024)
+		if name == "runtime/node" {
+			maximum = 128 * 1024 * 1024
+		}
+		if header.Typeflag != tar.TypeReg || header.Size < 1 || header.Size > maximum {
 			return fmt.Errorf("Gryphon release entry %s is invalid", name)
 		}
 		total += header.Size
-		if total > 32*1024*1024 {
-			return errors.New("Gryphon release expands beyond 32 MB")
+		if total > 160*1024*1024 {
+			return errors.New("Gryphon release expands beyond 160 MB")
 		}
 		destination := filepath.Join(target, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 			return err
 		}
-		output, err := os.OpenFile(destination, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+		mode := os.FileMode(0o600)
+		if name == "runtime/node" {
+			mode = 0o700
+		}
+		output, err := os.OpenFile(destination, os.O_CREATE|os.O_WRONLY|os.O_EXCL, mode)
 		if err != nil {
 			return err
 		}
@@ -334,12 +349,19 @@ func copyTree(source, target string) error {
 		}
 		destination := filepath.Join(target, relative)
 		if entry.IsDir() {
-			return os.MkdirAll(destination, 0o755)
+			if err := os.MkdirAll(destination, 0o755); err != nil {
+				return err
+			}
+			return os.Chmod(destination, 0o755)
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
 			return errors.New("Gryphon candidate contains a symbolic link")
 		}
-		return copyFile(current, destination, 0o644)
+		mode := os.FileMode(0o644)
+		if filepath.ToSlash(relative) == "runtime/node" {
+			mode = 0o755
+		}
+		return copyFile(current, destination, mode)
 	})
 }
 
@@ -364,11 +386,17 @@ func replaceGryphon(ctx context.Context, extracted string) error {
 	if err := restartGryphon(ctx); err == nil {
 		return os.RemoveAll(previous)
 	} else {
-		_ = os.Rename(gryphonApp, failed)
-		_ = os.Rename(previous, gryphonApp)
-		_, _ = exec.Command("systemctl", "restart", "gryphon.service").CombinedOutput()
+		if moveErr := os.Rename(gryphonApp, failed); moveErr != nil {
+			return errors.Join(err, moveErr)
+		}
+		if moveErr := os.Rename(previous, gryphonApp); moveErr != nil {
+			return errors.Join(err, moveErr)
+		}
+		rollbackContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		rollbackErr := restartGryphon(rollbackContext)
 		_ = os.RemoveAll(failed)
-		return err
+		return errors.Join(err, rollbackErr)
 	}
 }
 

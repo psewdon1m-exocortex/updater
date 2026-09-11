@@ -37,6 +37,9 @@ func StartNeptuneInitialization(runtimeConfig config.Runtime, store *state.Store
 		return model.Job{}, errors.New("request_id, head_id, project_id, export_url and enrollment_code are required")
 	}
 	if previous, ok := store.ByRequestID(request.RequestID); ok {
+		if previous.HeadID != request.HeadID || previous.Service != "neptune-initialization" {
+			return model.Job{}, errors.New("request id is already in use")
+		}
 		return previous, nil
 	}
 	head, err := config.LoadHead(runtimeConfig, request.HeadID)
@@ -57,10 +60,12 @@ func StartNeptuneInitialization(runtimeConfig config.Runtime, store *state.Store
 	if parsedExport.Hostname() != "localhost" && (exportIP == nil || !exportIP.IsLoopback()) {
 		return model.Job{}, errors.New("backup export URL must be loopback-only")
 	}
-	if !neptuneInstallationComplete() {
-		return model.Job{}, errors.New("Neptune must be installed on this VPS before it can be initialized")
+	releaseOperation, err := store.BeginOperation("")
+	if err != nil {
+		return model.Job{}, err
 	}
 	if !neptuneInitializationLock.TryLock() {
+		releaseOperation()
 		return model.Job{}, errors.New("another Neptune initialization is already running")
 	}
 	now := time.Now().UTC()
@@ -72,9 +77,11 @@ func StartNeptuneInitialization(runtimeConfig config.Runtime, store *state.Store
 	}
 	if err := store.Save(job); err != nil {
 		neptuneInitializationLock.Unlock()
+		releaseOperation()
 		return model.Job{}, err
 	}
-	go func() {
+	go func(job model.Job) {
+		defer releaseOperation()
 		defer neptuneInitializationLock.Unlock()
 		update := func(stateName, message string, finished bool) {
 			job.State, job.Message, job.UpdatedAt = stateName, message, time.Now().UTC()
@@ -97,7 +104,7 @@ func StartNeptuneInitialization(runtimeConfig config.Runtime, store *state.Store
 			return
 		}
 		update("COMPLETED", "Neptune initialized and linked", true)
-	}()
+	}(job)
 	return job, nil
 }
 
@@ -236,6 +243,7 @@ func EnrollNeptuneProject(runtimeConfig config.Runtime, headID, projectID, expor
 		return NeptuneEnrollmentResult{}, errors.New("Neptune service account IDs are invalid")
 	}
 	registration := exec.Command(neptuneBinary, "register-project", projectID, projectEnv)
+	registration.Env = append(os.Environ(), "HOME=/var/lib/neptune", "DOTNET_BUNDLE_EXTRACT_BASE_DIR=/var/cache/neptune")
 	registration.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{
 		Uid: uint32(uid), Gid: uint32(primaryGID), Groups: []uint32{uint32(gid)},
 	}}
@@ -253,7 +261,49 @@ func EnrollNeptuneProject(runtimeConfig config.Runtime, headID, projectID, expor
 	if output, commandErr := command.CombinedOutput(); commandErr != nil {
 		return NeptuneEnrollmentResult{}, fmt.Errorf("service restart after Neptune enrollment failed: %s", strings.TrimSpace(string(output)))
 	}
+	healthContext, cancelHealth := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelHealth()
+	if err := waitNeptuneProject(healthContext, projectID, controlToken); err != nil {
+		return NeptuneEnrollmentResult{}, err
+	}
 	return NeptuneEnrollmentResult{ProjectID: projectID, ProducerSlug: redeemed.Slug, NamespaceSlug: redeemed.NamespaceSlug, DeploymentID: redeemed.DeploymentID, SocketGID: gid, MirrorRoot: redeemed.MirrorRoot}, nil
+}
+
+func waitNeptuneProject(ctx context.Context, projectID, token string) error {
+	for {
+		if err := checkNeptuneProject(ctx, projectID, token); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return errors.New("Neptune project did not become ready before the initialization deadline")
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
+func checkNeptuneProject(ctx context.Context, projectID, token string) error {
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "unix", neptuneSocket)
+	}}
+	defer transport.CloseIdleConnections()
+	route := "/v1/health"
+	if projectID != "" {
+		route = "/v1/projects/" + url.PathEscape(projectID) + "/status"
+	}
+	request, _ := http.NewRequestWithContext(ctx, "GET", "http://neptune.local"+route, nil)
+	if token != "" {
+		request.Header.Set("X-Neptune-Token", token)
+	}
+	response, err := (&http.Client{Transport: transport, Timeout: 5 * time.Second}).Do(request)
+	if err != nil {
+		return errors.New("Neptune has not become reachable after initialization")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 200 {
+		return errors.New("Neptune project authentication or readiness failed")
+	}
+	return nil
 }
 
 func validateNeptuneEnrollmentProfile(projectID string, redeemed saturnEnrollment) error {

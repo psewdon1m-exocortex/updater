@@ -121,3 +121,5 @@ Installed service heads may invoke the equivalent enrollment through the authent
 `updater update` is operator-triggered. It downloads the checksummed updater release,
 atomically replaces the binary, restarts the systemd unit, verifies the Unix
 socket health endpoint and restores the previous binary if verification fails.
+
+The current six-service deployment, trust, recovery and acceptance contract is documented in [Deployment readiness](DEPLOYMENT_READINESS.md).

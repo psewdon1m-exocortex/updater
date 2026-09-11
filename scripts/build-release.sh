@@ -30,6 +30,9 @@ debroot="$(mktemp -d)"
 stage="$(mktemp -d)"
 trap 'rm -rf "$debroot" "$stage"' EXIT
 mkdir -p "$debroot/DEBIAN" "$debroot/usr/bin" "$debroot/lib/systemd/system"
+mkdir -p "$debroot/usr/share/exocortex-updater/systemd"
+cp "$root/install.sh" "$debroot/usr/share/exocortex-updater/install.sh"
+cp "$root/systemd/updater.service" "$debroot/usr/share/exocortex-updater/systemd/"
 sed "s/^Version: .*/Version: $version/" \
   "$root/packaging/control" > "$debroot/DEBIAN/control"
 cp "$root/packaging/postinst" "$debroot/DEBIAN/postinst"
@@ -49,6 +52,7 @@ cp "$root/install.sh" "$stage/updater/install.sh"
 cp "$root/systemd/updater.service" "$stage/updater/systemd/"
 chmod 0755 "$stage/updater/"{install.sh,updater-linux-amd64}
 tar -czf "$root/$output/updater-${version}-install.tar.gz" -C "$stage" updater
+installer_sha="$(sha256sum "$root/$output/updater-${version}-install.tar.gz" | awk '{print $1}')"
 (
   cd "$root/$output"
   sha256sum "updater-${version}-install.tar.gz" > "updater-${version}-install.tar.gz.sha256"
@@ -62,6 +66,10 @@ cat > "$root/$output/updater-release.json" <<EOF
   "binary": {
     "url": "https://github.com/${repository}/releases/download/updater-v${version}/updater-linux-amd64",
     "sha256": "$binary_sha"
+  },
+  "installer": {
+    "url": "https://github.com/${repository}/releases/download/updater-v${version}/updater-${version}-install.tar.gz",
+    "sha256": "$installer_sha"
   }
 }
 EOF

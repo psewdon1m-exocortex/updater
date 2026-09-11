@@ -109,6 +109,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--policy", default=".github/pre-push-gate.json")
     parser.add_argument("--base")
+    parser.add_argument("--worktree", action="store_true", help="Include unstaged, staged and untracked non-ignored files")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--upstream-result", default="success")
     parser.add_argument("--report", default=".pre-push-gate-report.json")
@@ -182,8 +183,12 @@ def main() -> int:
     head = git("rev-parse", args.head).stdout.strip()
     base = choose_base(args.base, head)
     changed = changed_files(base, head)
+    if args.worktree:
+        changed = sorted(set(git("diff", "--name-only", "--diff-filter=ACMR", "HEAD").stdout.splitlines()) | set(git("ls-files", "--others", "--exclude-standard").stdout.splitlines()))
 
     diff_args = ("diff", "--check", base, head) if base else ("diff", "--check")
+    if args.worktree:
+        diff_args = ("diff", "--check", "HEAD")
     diff_check = git(*diff_args, check=False)
     if diff_check.returncode:
         errors.append(f"git diff --check failed:\n{diff_check.stdout}{diff_check.stderr}")
@@ -215,6 +220,7 @@ def main() -> int:
 
     report = {
         "schema": "exocortex.pre-push-gate.v1",
+        "working_tree": args.worktree,
         "service": service,
         "head": head,
         "base": base,
