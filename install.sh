@@ -33,6 +33,16 @@ fi
 
 getent group updater >/dev/null 2>&1 || groupadd --system updater
 install -d -o root -g updater -m 0750 /etc/exocortex /run/exocortex
+bundled_trust="$script_dir/release-trust/updater.pem"
+if [ -f "$bundled_trust" ]; then
+  trust_file=/etc/exocortex/release-trust/updater.pem
+  install -d -o root -g root -m 0755 /etc/exocortex/release-trust
+  if [ -f "$trust_file" ] && ! cmp -s "$bundled_trust" "$trust_file"; then
+    echo "Installed Updater release key differs from the signed bundle." >&2
+    exit 5
+  fi
+  [ -f "$trust_file" ] || install -o root -g root -m 0644 "$bundled_trust" "$trust_file"
+fi
 install -d -o root -g root -m 0700 /var/lib/updater
 # Provision only fixed helper identities and paths, before the sandbox starts.
 # The daemons themselves are installed on demand from verified releases.

@@ -1,4 +1,4 @@
-"""Bootstrap verifier: only a pre-provisioned public key establishes trust."""
+"""Verify a release with the explicit public key selected by the caller."""
 import base64
 import hashlib
 import json

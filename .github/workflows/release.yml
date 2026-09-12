@@ -42,7 +42,12 @@ jobs:
         run: go test ./...
 
       - name: Build release artifacts
-        run: bash scripts/build-release.sh "${{ steps.release.outputs.version }}"
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        shell: bash
+        run: |
+          node scripts/sign-release.mjs --export-public-key release-artifacts/updater.pem
+          bash scripts/build-release.sh "${{ steps.release.outputs.version }}"
 
       - name: Sign trusted release manifest
         env:

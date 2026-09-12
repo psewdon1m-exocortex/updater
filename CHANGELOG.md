@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2
+
+- Bootstrap and pin missing public release keys from the same HTTPS GitHub
+  release before verified first installation of Neptune or Gryphon.
+- Carry the Updater public key inside the signed installation bundle so a new
+  host needs no manual release-trust provisioning.
+
 ## 0.4.1
 
 - Restart Saturn's loopback-only `web` service during update and rollback;

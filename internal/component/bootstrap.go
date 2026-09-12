@@ -3,8 +3,6 @@ package component
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"os"
-	"path/filepath"
 	"sort"
 	"time"
 	"updater/internal/config"
@@ -42,13 +40,6 @@ func ReconcileHostHelpers(runtime config.Runtime, store *state.Store) {
 			needed = append(needed, "gryphon")
 		}
 		for _, helper := range needed {
-			trustDir := os.Getenv("EXOCORTEX_RELEASE_TRUST_DIR")
-			if trustDir == "" {
-				trustDir = "/etc/exocortex/release-trust"
-			}
-			if _, err := os.Stat(filepath.Join(trustDir, helper+".pem")); err != nil {
-				continue
-			}
 			release, err := store.BeginOperation("")
 			if err != nil {
 				return

@@ -7,7 +7,9 @@ Updater releases use tags in the form `updater-vMAJOR.MINOR.PATCH`.
 3. Commit the release state and push `updater-vX.Y.Z`.
 4. CI builds a static Linux amd64 binary, Debian package and a self-contained
    `updater-X.Y.Z-install.tar.gz` consumed by Kernel and Perimetr release jobs.
-   It publishes SHA-256 files, keyless Sigstore bundles and build provenance.
+   It derives and publishes only `updater.pem` from the protected signing
+   secret, embeds that public key in the install archive, and publishes SHA-256
+   files, keyless Sigstore bundles and build provenance.
 5. Verify the GitHub release before using `updater update`.
 
 Kernel Register must contain `repositories.updater.url`. The updater

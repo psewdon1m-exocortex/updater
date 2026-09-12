@@ -56,7 +56,7 @@ self-update command.
 ## Installation with a head
 
 Kernel and Perimetr release bundles contain the updater binary, unit and
-installer. After configuring the head `.env`, their `install.sh` installs both
+installer together with the Updater public release key. After configuring the head `.env`, their `install.sh` installs both
 the local updater and the head containers. The updater can also be installed
 manually:
 
@@ -78,6 +78,8 @@ server-managed Nginx.
 
 - no arbitrary command, image or URL is accepted from a head;
 - release metadata is accepted only from HTTPS GitHub repositories;
+- a missing Neptune or Gryphon public key is obtained from the same HTTPS
+  release, verified against the signed manifest and then pinned locally;
 - the compose archive must match the SHA-256 stored in the selected manifest;
 - the selected image is pulled by immutable digest;
 - the operator download and server-side backup are created before mutation;

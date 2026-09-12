@@ -12,6 +12,11 @@ repository="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 }
 
 mkdir -p "$root/$output"
+public_key="${RELEASE_PUBLIC_KEY_FILE:-$root/$output/updater.pem}"
+[[ -f "$public_key" ]] || {
+  echo "Updater release public key must be exported before building artifacts" >&2
+  exit 3
+}
 binary="$root/$output/updater-linux-amd64"
 (
   cd "$root"
@@ -46,10 +51,11 @@ dpkg-deb --build --root-owner-group \
   sha256sum "updater_${version}_amd64.deb" > "updater_${version}_amd64.deb.sha256"
 )
 
-mkdir -p "$stage/updater/systemd"
+mkdir -p "$stage/updater/systemd" "$stage/updater/release-trust"
 cp "$binary" "$stage/updater/updater-linux-amd64"
 cp "$root/install.sh" "$stage/updater/install.sh"
 cp "$root/systemd/updater.service" "$stage/updater/systemd/"
+cp "$public_key" "$stage/updater/release-trust/updater.pem"
 chmod 0755 "$stage/updater/"{install.sh,updater-linux-amd64}
 tar -czf "$root/$output/updater-${version}-install.tar.gz" -C "$stage" updater
 installer_sha="$(sha256sum "$root/$output/updater-${version}-install.tar.gz" | awk '{print $1}')"
