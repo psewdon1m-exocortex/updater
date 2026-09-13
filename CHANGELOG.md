@@ -1,7 +1,7 @@
 # Changelog
 
 Normative behavior is governed by [Part 00 — system unification
-specification](../.docs/PART_00_SYSTEM_UNIFICATION_SPECIFICATION.md); changelog
+specification](https://github.com/psewdon1m-exocortex/general/blob/main/PART_00_SYSTEM_UNIFICATION_SPECIFICATION.md); changelog
 entries are historical evidence and do not override it.
 
 ## 0.4.4

@@ -1,6 +1,6 @@
 # updater
 
-> Documentation authority: the workspace-wide [Part 00](../.docs/PART_00_SYSTEM_UNIFICATION_SPECIFICATION.md)
+> Documentation authority: the workspace-wide [Part 00](https://github.com/psewdon1m-exocortex/general/blob/main/PART_00_SYSTEM_UNIFICATION_SPECIFICATION.md)
 > and its applicable Parts are normative. This repository documents
 > Updater-specific details only; a conflict is corrected here and a material
 > implementation difference follows the Part 00 divergence protocol.
@@ -8,7 +8,7 @@
 ## Required pre-push gate
 
 After native checks and before every push, complete the checks required by
-[Part 06 — Unified acceptance checklist](../.docs/PART_06_UNIFIED_ACCEPTANCE_CHECKLIST.md) and run the versioned policy in
+[Part 06 — Unified acceptance checklist](https://github.com/psewdon1m-exocortex/general/blob/main/PART_06_UNIFIED_ACCEPTANCE_CHECKLIST.md) and run the versioned policy in
 `.github/pre-push-gate.json` through `scripts/pre-push-gate.py`. CI repeats the
 gate on `main`. Security is always reviewed; backup/restore, updater, embedded
 Documentation and affected technical docs are reviewed when relevant. Apply

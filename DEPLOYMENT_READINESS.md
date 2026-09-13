@@ -1,10 +1,10 @@
 # updater deployment and recovery contract
 
 This service-local record is subordinate to the coordinated
-[Part 11 deployment profile](../.docs/PART_11_INITIAL_MULTI_SERVICE_DEPLOYMENT.md)
+[Part 11 deployment profile](https://github.com/psewdon1m-exocortex/general/blob/main/PART_11_INITIAL_MULTI_SERVICE_DEPLOYMENT.md)
 and the shared-agent contracts in
-[Part 09](../.docs/PART_09_SERVICE_AGENTS_DEPLOYMENT_AND_LIFECYCLE.md) and
-[Part 10](../.docs/PART_10_SERVICE_AGENTS_UI_AND_OPERATOR_WORKFLOWS.md).
+[Part 09](https://github.com/psewdon1m-exocortex/general/blob/main/PART_09_SERVICE_AGENTS_DEPLOYMENT_AND_LIFECYCLE.md) and
+[Part 10](https://github.com/psewdon1m-exocortex/general/blob/main/PART_10_SERVICE_AGENTS_UI_AND_OPERATOR_WORKFLOWS.md).
 
 A single host daemon serves typed authenticated operations. Connected heads can initialize Neptune; only Saturn consumes Gryphon in this profile and may receive the explicit host-recovery grant. Job reads are scoped to the requesting head. Missing required helpers are reconciled automatically after head registration and trusted Kernel configuration. One filesystem lock and durable job reservation serialize updates, installation, CLI actions, self-update and helper restore. Interrupted jobs become terminal failures with rollback snapshots retained. Self-update verifies the RSA-signed manifest, binary and installer archive before preparing host permissions/systemd, replacing the binary, and verifying its reported version; failure restores the prior binary and unit. Helper recovery encrypts configuration, bindings, journals and spools with a separately retained passphrase and uses a crash-recoverable directory transaction.
 
