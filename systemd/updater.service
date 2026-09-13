@@ -11,15 +11,7 @@ RestartSec=3
 User=root
 Group=updater
 UMask=0007
-Environment=UPDATER_SOCKET_PATH=/run/exocortex/updater.sock
-Environment=UPDATER_STATE_DIR=/var/lib/updater
-Environment=UPDATER_HEADS_FILE=/etc/exocortex/updater-heads.json
-Environment=UPDATER_MAX_RETAINED_JOBS=20
-Environment=UPDATER_RETENTION_DAYS=30
-Environment=UPDATER_COMMAND_TIMEOUT_SEC=300
-Environment=NEPTUNE_UPDATER_TOKEN_FILE=/etc/neptune/updater-agent.token
-Environment=HOME=/var/lib/updater
-Environment=EXOCORTEX_PREPARED_HOST=true
+EnvironmentFile=/etc/exocortex/updater/.env
 LogRateLimitIntervalSec=30s
 LogRateLimitBurst=200
 RuntimeDirectory=exocortex

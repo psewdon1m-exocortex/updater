@@ -30,8 +30,11 @@ by the Unix-socket collision.
 
 ## Configuration
 
-The updater has no service-specific `.env`. A root-owned registry maps a head
-ID to that head's existing environment file:
+Updater has its own root-owned, mode-`0600`
+`/etc/exocortex/updater/.env`. It contains only updater-daemon settings such as
+its socket, state, retention and registry paths; it never absorbs another
+service's secrets. A separate root-owned registry maps a head ID to that
+head's existing, independently managed environment file:
 
 ```sh
 sudo updater register-head kernel /opt/exocortex/kernel/.env
@@ -53,11 +56,33 @@ reports a successfully installed release as still pending.
 `repositories.updater.url` is used only by the manual `updater update`
 self-update command.
 
+## Installation
+
+Install one explicit immutable Updater release with Updater's own bootstrap
+(replace `X.Y.Z`):
+
+```sh
+curl -fsSL https://github.com/psewdon1m-exocortex/updater/releases/download/updater-vX.Y.Z/bootstrap.sh | sudo sh
+```
+
+The protected release job keeps Updater's private signing key in GitHub
+Secrets, derives its public counterpart and embeds only the public key in that
+versioned bootstrap. On a clean host bootstrap creates
+`/etc/exocortex/release-trust/updater.pem`, verifies
+`updater-release.json` before trusting its artifact locations, and only then
+accepts the signed installer's pinned Neptune and Gryphon public keys. The
+installer writes all three keys under `/etc/exocortex/release-trust`, creates
+Updater's own `.env`, and installs the daemon. Any existing mismatching key
+fails closed. Installation requires no `scp`, manual release-key fingerprint
+or separately downloaded public key.
+
 ## Installation with a head
 
-Kernel and Perimetr release bundles contain the updater binary, unit and
-installer together with the Updater public release key. After configuring the head `.env`, their `install.sh` installs both
-the local updater and the head containers. The updater can also be installed
+Kernel and Perimetr release bundles may contain the updater binary, unit and
+installer after their release CI has verified the pinned Updater release.
+After configuring the head's own `.env`, their `install.sh` can install the
+verified local updater and the head containers. It must preserve Updater's
+independent trust and `.env` boundaries. The updater can also be installed
 manually:
 
 ```sh
@@ -78,8 +103,9 @@ server-managed Nginx.
 
 - no arbitrary command, image or URL is accepted from a head;
 - release metadata is accepted only from HTTPS GitHub repositories;
-- a missing Neptune or Gryphon public key is obtained from the same HTTPS
-  release, verified against the signed manifest and then pinned locally;
+- Neptune and Gryphon trust is carried inside the installer whose manifest was
+  verified by the public key embedded in Updater's exact-version bootstrap; a
+  public key beside a helper artifact is never accepted as its trust source;
 - the compose archive must match the SHA-256 stored in the selected manifest;
 - the selected image is pulled by immutable digest;
 - the operator download and server-side backup are created before mutation;
@@ -100,8 +126,9 @@ server-managed Nginx.
 
 The worker retains at most 20 finished jobs/backups and removes finished data
 older than 30 days. The systemd journal is rate-limited to 200 messages per
-30 seconds. These host-wide defaults are declared in `updater.service`, not in
-a second service-specific `.env`.
+30 seconds. Unit-level safety defaults remain declared in `updater.service`;
+`/etc/exocortex/updater/.env` is the only Updater environment file and head
+settings remain in each head's own `.env`.
 
 A single container replacement can cause a short connection interruption.
 Running work in other services is not stopped. Processes that already resolved
@@ -122,7 +149,13 @@ updater neptune doctor
 updater version
 ```
 
-`neptune install` bootstraps the host-wide daemon from the latest checksummed Linux release when it is absent and uses the same rollback-safe binary replacement for later upgrades. `neptune enroll` reads a 15-minute single-use Saturn code from standard input, creates isolated local tokens, registers the project, updates its existing `.env`, and recreates only that service container.
+`neptune install` bootstraps the host-wide daemon from the newest Linux release
+allowed by the already trusted, signed Neptune manifest when it is absent and
+uses the same rollback-safe binary replacement for later upgrades. It never
+learns first-install trust from a key beside that release. `neptune enroll`
+reads a 15-minute single-use Saturn code from standard input, creates isolated
+local tokens, registers the project, updates its existing `.env`, and recreates
+only that service container.
 
 Installed service heads may invoke the equivalent enrollment through the authenticated local Unix socket. The API accepts only the registered head/project pair, a loopback export URL and a 32-character one-time Saturn code; it creates a durable background job and never stores the code. A missing Neptune installation is not bootstrapped from a service UI and still requires the host installer.
 

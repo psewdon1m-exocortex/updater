@@ -32,7 +32,7 @@ func TestNodeProducerSignatureAndTamperRejection(t *testing.T) {
 	}
 }
 
-func TestVerifyDownloadedBootstrapsAndPinsPublicKey(t *testing.T) {
+func TestVerifyDownloadedRequiresPreviouslyPinnedPublicKey(t *testing.T) {
 	read := func(name string) []byte {
 		value, err := os.ReadFile("testdata/" + name)
 		if err != nil {
@@ -50,31 +50,26 @@ func TestVerifyDownloadedBootstrapsAndPinsPublicKey(t *testing.T) {
 	}
 	trustDirectory := filepath.Join(directory, "trust")
 	t.Setenv("EXOCORTEX_RELEASE_TRUST_DIR", trustDirectory)
-	keyRequests := 0
 	server := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/owner/repo/releases/download/updater-v1.0.0/updater-release.json.sig.json":
 			_, _ = response.Write(envelope)
-		case "/owner/repo/releases/download/updater-v1.0.0/updater.pem":
-			keyRequests++
-			_, _ = response.Write(key)
 		default:
 			http.NotFound(response, request)
 		}
 	}))
 	defer server.Close()
 	signatureURL := server.URL + "/owner/repo/releases/download/updater-v1.0.0/updater-release.json.sig.json"
-	if err := VerifyDownloaded(t.Context(), server.Client(), manifestPath, signatureURL, "updater"); err != nil {
+	if err := VerifyDownloaded(t.Context(), server.Client(), manifestPath, signatureURL, "updater"); err == nil {
+		t.Fatal("missing pinned release trust was accepted")
+	}
+	if err := os.MkdirAll(trustDirectory, 0755); err != nil {
 		t.Fatal(err)
 	}
-	pinned, err := os.ReadFile(filepath.Join(trustDirectory, "updater.pem"))
-	if err != nil || string(pinned) != string(key) {
-		t.Fatal("verified public key was not persisted")
+	if err := os.WriteFile(filepath.Join(trustDirectory, "updater.pem"), key, 0644); err != nil {
+		t.Fatal(err)
 	}
 	if err := VerifyDownloaded(t.Context(), server.Client(), manifestPath, signatureURL, "updater"); err != nil {
 		t.Fatal(err)
-	}
-	if keyRequests != 1 {
-		t.Fatalf("pinned key should prevent another bootstrap download; got %d requests", keyRequests)
 	}
 }

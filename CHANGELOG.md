@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.3
+
+- Publish a standalone exact-version bootstrap with embedded RSA release trust.
+- Require service trust to be pinned before release verification; a key beside
+  a manifest is never accepted as a first-install trust anchor.
+- Preserve the Updater, Neptune and Gryphon public trust files through head
+  installs, Debian installs and Updater self-update, and own a separate
+  root-only Updater environment.
+
 ## 0.4.2
 
 - Bootstrap and pin missing public release keys from the same HTTPS GitHub

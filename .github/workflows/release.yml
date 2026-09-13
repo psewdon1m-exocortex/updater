@@ -39,7 +39,9 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Test
-        run: go test ./...
+        run: |
+          sh -n bootstrap.sh install.sh
+          go test ./...
 
       - name: Build release artifacts
         env:
@@ -52,7 +54,12 @@ jobs:
       - name: Sign trusted release manifest
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
-        run: node scripts/sign-release.mjs release-artifacts/updater-release.json
+        shell: bash
+        run: |
+          node scripts/sign-release.mjs release-artifacts/updater-release.json
+          node scripts/build-bootstrap.mjs bootstrap.sh release-artifacts/updater.pem release-artifacts/bootstrap.sh "${{ steps.release.outputs.version }}"
+          sh -n release-artifacts/bootstrap.sh
+          if grep -q '__UPDATER_BOOTSTRAP_' release-artifacts/bootstrap.sh; then exit 1; fi
       - name: Sign backward-compatible release artifacts
         shell: bash
         run: |

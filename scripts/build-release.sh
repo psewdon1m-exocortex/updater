@@ -17,6 +17,12 @@ public_key="${RELEASE_PUBLIC_KEY_FILE:-$root/$output/updater.pem}"
   echo "Updater release public key must be exported before building artifacts" >&2
   exit 3
 }
+for helper in neptune gryphon; do
+  [[ -f "$root/release-trust/$helper.pem" ]] || {
+    echo "Pinned $helper release public key is missing" >&2
+    exit 3
+  }
+done
 binary="$root/$output/updater-linux-amd64"
 (
   cd "$root"
@@ -35,9 +41,11 @@ debroot="$(mktemp -d)"
 stage="$(mktemp -d)"
 trap 'rm -rf "$debroot" "$stage"' EXIT
 mkdir -p "$debroot/DEBIAN" "$debroot/usr/bin" "$debroot/lib/systemd/system"
-mkdir -p "$debroot/usr/share/exocortex-updater/systemd"
+mkdir -p "$debroot/usr/share/exocortex-updater/systemd" "$debroot/usr/share/exocortex-updater/release-trust"
 cp "$root/install.sh" "$debroot/usr/share/exocortex-updater/install.sh"
 cp "$root/systemd/updater.service" "$debroot/usr/share/exocortex-updater/systemd/"
+cp "$public_key" "$debroot/usr/share/exocortex-updater/release-trust/updater.pem"
+cp "$root/release-trust/neptune.pem" "$root/release-trust/gryphon.pem" "$debroot/usr/share/exocortex-updater/release-trust/"
 sed "s/^Version: .*/Version: $version/" \
   "$root/packaging/control" > "$debroot/DEBIAN/control"
 cp "$root/packaging/postinst" "$debroot/DEBIAN/postinst"
@@ -56,6 +64,7 @@ cp "$binary" "$stage/updater/updater-linux-amd64"
 cp "$root/install.sh" "$stage/updater/install.sh"
 cp "$root/systemd/updater.service" "$stage/updater/systemd/"
 cp "$public_key" "$stage/updater/release-trust/updater.pem"
+cp "$root/release-trust/neptune.pem" "$root/release-trust/gryphon.pem" "$stage/updater/release-trust/"
 chmod 0755 "$stage/updater/"{install.sh,updater-linux-amd64}
 tar -czf "$root/$output/updater-${version}-install.tar.gz" -C "$stage" updater
 installer_sha="$(sha256sum "$root/$output/updater-${version}-install.tar.gz" | awk '{print $1}')"

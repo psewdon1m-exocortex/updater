@@ -25,7 +25,7 @@ func extractInstallation(archive, destination, binaryHash string) (string, error
 	defer compressed.Close()
 	reader := tar.NewReader(compressed)
 	seen := map[string]bool{}
-	expected := map[string]int64{"updater/updater-linux-amd64": 64 * 1024 * 1024, "updater/install.sh": 256 * 1024, "updater/systemd/updater.service": 64 * 1024}
+	expected := map[string]int64{"updater/updater-linux-amd64": 64 * 1024 * 1024, "updater/install.sh": 256 * 1024, "updater/systemd/updater.service": 64 * 1024, "updater/release-trust/updater.pem": 16 * 1024, "updater/release-trust/neptune.pem": 16 * 1024, "updater/release-trust/gryphon.pem": 16 * 1024}
 	for {
 		h, err := reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -34,7 +34,7 @@ func extractInstallation(archive, destination, binaryHash string) (string, error
 		if err != nil {
 			return "", err
 		}
-		if h.Typeflag == tar.TypeDir && (h.Name == "updater/" || h.Name == "updater/systemd/") {
+		if h.Typeflag == tar.TypeDir && (h.Name == "updater/" || h.Name == "updater/systemd/" || h.Name == "updater/release-trust/") {
 			continue
 		}
 		limit, ok := expected[h.Name]

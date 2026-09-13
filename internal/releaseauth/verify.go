@@ -13,9 +13,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 )
 
@@ -81,63 +79,14 @@ func downloadLimited(ctx context.Context, client *http.Client, location string, 
 	return value, nil
 }
 
-func releasePublicKeyURL(signatureURL, service string) (string, error) {
-	parsed, err := url.Parse(signatureURL)
-	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" {
-		return "", errors.New("signed release manifest is required")
-	}
-	parsed.Path = path.Join(path.Dir(parsed.Path), service+".pem")
-	parsed.RawQuery = ""
-	parsed.Fragment = ""
-	return parsed.String(), nil
-}
-
-func persistBootstrappedKey(directory, service string, value []byte) error {
-	if err := os.MkdirAll(directory, 0755); err != nil {
-		return errors.New("release trust directory cannot be created")
-	}
-	target := filepath.Join(directory, service+".pem")
-	file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
-	if errors.Is(err, os.ErrExist) {
-		existing, readErr := os.ReadFile(target)
-		if readErr != nil || string(existing) != string(value) {
-			return errors.New("release trust key changed during bootstrap")
-		}
-		return nil
-	}
-	if err != nil {
-		return errors.New("release trust key cannot be installed")
-	}
-	if err = file.Chmod(0644); err != nil {
-		_ = file.Close()
-		_ = os.Remove(target)
-		return errors.New("release trust key cannot be installed")
-	}
-	if _, err = file.Write(value); err == nil {
-		err = file.Sync()
-	}
-	closeErr := file.Close()
-	if err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		_ = os.Remove(target)
-		return errors.New("release trust key cannot be installed")
-	}
-	return nil
-}
-
-// An existing host key stays pinned. On first use the public key is bootstrapped
-// from the same HTTPS GitHub release as the manifest, verified, then persisted.
+// Release trust must already have been pinned by an authenticated bootstrap.
+// Head bootstraps carry the signed Updater installer, which also provisions
+// helper trust. A public key beside a manifest is not an authentication anchor.
 func VerifyDownloaded(ctx context.Context, client *http.Client, manifestPath, signatureURL, service string) error {
 	switch service {
 	case "kernel", "volt", "saturn", "updater", "neptune", "gryphon":
 	default:
 		return errors.New("unsupported release trust scope")
-	}
-	publicKeyURL, err := releasePublicKeyURL(signatureURL, service)
-	if err != nil {
-		return errors.New("signed release manifest is required")
 	}
 	trustDirectory := os.Getenv("EXOCORTEX_RELEASE_TRUST_DIR")
 	if trustDirectory == "" {
@@ -153,19 +102,8 @@ func VerifyDownloaded(ctx context.Context, client *http.Client, manifestPath, si
 	}
 	keyPath := filepath.Join(trustDirectory, service+".pem")
 	key, err := os.ReadFile(keyPath)
-	bootstrap := false
-	if errors.Is(err, os.ErrNotExist) {
-		key, err = downloadLimited(ctx, client, publicKeyURL, 16384, "release public key is unavailable")
-		bootstrap = true
-	}
 	if err != nil {
-		return errors.New("release trust key is unavailable for " + service)
+		return errors.New("release trust key is unavailable for " + service + "; run an exact-version Updater or head bootstrap first")
 	}
-	if err = VerifyBytes(manifest, envelope, key); err != nil {
-		return err
-	}
-	if bootstrap {
-		return persistBootstrappedKey(trustDirectory, service, key)
-	}
-	return nil
+	return VerifyBytes(manifest, envelope, key)
 }

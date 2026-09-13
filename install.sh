@@ -14,14 +14,20 @@ exec 9>/run/lock/updater-install.lock
 flock -x 9
 
 script_dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+standalone=false
 if [ "$#" -eq 2 ] && [ "$1" = --prepare-host ]; then
   head_id=""
   head_env=""
   binary="$2"
   UPDATER_PREPARE_ONLY=true
+elif [ "$#" -eq 2 ] && [ "$1" = --install-host ]; then
+  head_id=""
+  head_env=""
+  binary="$2"
+  standalone=true
 else
   if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
-    echo "Usage: updater/install.sh <head-id> <head-env-file> [updater-binary] | --prepare-host <binary>" >&2
+    echo "Usage: updater/install.sh <head-id> <head-env-file> [updater-binary] | --prepare-host <binary> | --install-host <binary>" >&2
     exit 2
   fi
   head_id="$1"
@@ -33,16 +39,42 @@ fi
 
 getent group updater >/dev/null 2>&1 || groupadd --system updater
 install -d -o root -g updater -m 0750 /etc/exocortex /run/exocortex
-bundled_trust="$script_dir/release-trust/updater.pem"
-if [ -f "$bundled_trust" ]; then
-  trust_file=/etc/exocortex/release-trust/updater.pem
-  install -d -o root -g root -m 0755 /etc/exocortex/release-trust
+install -d -o root -g root -m 0755 /etc/exocortex/release-trust
+for trust_service in updater neptune gryphon; do
+  bundled_trust="$script_dir/release-trust/$trust_service.pem"
+  [ -f "$bundled_trust" ] && [ ! -L "$bundled_trust" ] || {
+    echo "The signed Updater bundle has no release-trust/$trust_service.pem." >&2
+    exit 5
+  }
+  trust_file="/etc/exocortex/release-trust/$trust_service.pem"
   if [ -f "$trust_file" ] && ! cmp -s "$bundled_trust" "$trust_file"; then
-    echo "Installed Updater release key differs from the signed bundle." >&2
+    echo "Installed $trust_service release key differs from the signed Updater bundle." >&2
     exit 5
   fi
   [ -f "$trust_file" ] || install -o root -g root -m 0644 "$bundled_trust" "$trust_file"
+done
+
+updater_env=/etc/exocortex/updater/.env
+install -d -o root -g root -m 0700 /etc/exocortex/updater
+if [ ! -f "$updater_env" ]; then
+  temporary_env="$(mktemp /etc/exocortex/updater/.env.XXXXXX)"
+  cat >"$temporary_env" <<'EOF'
+UPDATER_SOCKET_PATH=/run/exocortex/updater.sock
+UPDATER_STATE_DIR=/var/lib/updater
+UPDATER_HEADS_FILE=/etc/exocortex/updater-heads.json
+UPDATER_MAX_RETAINED_JOBS=20
+UPDATER_RETENTION_DAYS=30
+UPDATER_COMMAND_TIMEOUT_SEC=300
+NEPTUNE_UPDATER_TOKEN_FILE=/etc/neptune/updater-agent.token
+HOME=/var/lib/updater
+EXOCORTEX_PREPARED_HOST=true
+EOF
+  chown root:root "$temporary_env"
+  chmod 0600 "$temporary_env"
+  mv "$temporary_env" "$updater_env"
 fi
+chown root:root "$updater_env"
+chmod 0600 "$updater_env"
 install -d -o root -g root -m 0700 /var/lib/updater
 # Provision only fixed helper identities and paths, before the sandbox starts.
 # The daemons themselves are installed on demand from verified releases.
@@ -110,16 +142,18 @@ if [ "$restart_required" = true ] || [ ! -f /etc/systemd/system/updater.service 
   restart_required=true
 fi
 
-/usr/bin/updater register-head "$head_id" "$head_env"
-if grep -q '^UPDATER_SERVICE_ID=saturn$' "$head_env" && ! grep -q '^UPDATER_HOST_RECOVERY_ALLOWED=' "$head_env"; then
-  printf '\nUPDATER_HOST_RECOVERY_ALLOWED=true\n' >> "$head_env"
-fi
 socket_gid="$(getent group updater | cut -d: -f3)"
 
-if grep -q '^UPDATER_SOCKET_GID=' "$head_env"; then
-  sed -i "s/^UPDATER_SOCKET_GID=.*/UPDATER_SOCKET_GID=$socket_gid/" "$head_env"
-else
-  printf '\nUPDATER_SOCKET_GID=%s\n' "$socket_gid" >> "$head_env"
+if [ "$standalone" != true ]; then
+  /usr/bin/updater register-head "$head_id" "$head_env"
+  if grep -q '^UPDATER_SERVICE_ID=saturn$' "$head_env" && ! grep -q '^UPDATER_HOST_RECOVERY_ALLOWED=' "$head_env"; then
+    printf '\nUPDATER_HOST_RECOVERY_ALLOWED=true\n' >> "$head_env"
+  fi
+  if grep -q '^UPDATER_SOCKET_GID=' "$head_env"; then
+    sed -i "s/^UPDATER_SOCKET_GID=.*/UPDATER_SOCKET_GID=$socket_gid/" "$head_env"
+  else
+    printf '\nUPDATER_SOCKET_GID=%s\n' "$socket_gid" >> "$head_env"
+  fi
 fi
 
 if [ "$restart_required" = true ]; then
@@ -130,5 +164,9 @@ elif ! systemctl is-active --quiet updater.service; then
   systemctl enable --now updater.service
 fi
 
-echo "updater installed; head '$head_id' is registered"
+if [ "$standalone" = true ]; then
+  echo "updater installed; no service head was registered"
+else
+  echo "updater installed; head '$head_id' is registered"
+fi
 echo "Unix socket group ID: $socket_gid"

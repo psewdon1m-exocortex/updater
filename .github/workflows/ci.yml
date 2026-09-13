@@ -29,6 +29,11 @@ jobs:
           cache: true
       - name: Vet
         run: go vet ./...
+      - name: Validate installer and pinned helper trust
+        run: |
+          sh -n bootstrap.sh install.sh scripts/build-release.sh
+          test -s release-trust/neptune.pem
+          test -s release-trust/gryphon.pem
       - name: Test
         run: go test -count=1 ./...
       - name: Build Linux binary
