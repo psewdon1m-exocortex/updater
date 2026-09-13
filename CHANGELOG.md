@@ -1,5 +1,16 @@
 # Changelog
 
+Normative behavior is governed by [Part 00 — system unification
+specification](../.docs/PART_00_SYSTEM_UNIFICATION_SPECIFICATION.md); changelog
+entries are historical evidence and do not override it.
+
+## 0.4.4
+
+- Restore group-readable Neptune project and credential files even when a head
+  installer invokes enrollment under a restrictive umask.
+- Force-recreate only the enrolled head service so atomically replaced Neptune
+  credentials are mounted immediately without restarting unrelated services.
+
 ## 0.4.3
 
 - Publish a standalone exact-version bootstrap with embedded RSA release trust.

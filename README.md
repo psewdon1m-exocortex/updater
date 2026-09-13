@@ -1,5 +1,21 @@
 # updater
 
+> Documentation authority: the workspace-wide [Part 00](../.docs/PART_00_SYSTEM_UNIFICATION_SPECIFICATION.md)
+> and its applicable Parts are normative. This repository documents
+> Updater-specific details only; a conflict is corrected here and a material
+> implementation difference follows the Part 00 divergence protocol.
+
+## Required pre-push gate
+
+After native checks and before every push, complete the checks required by
+[Part 06 — Unified acceptance checklist](../.docs/PART_06_UNIFIED_ACCEPTANCE_CHECKLIST.md) and run the versioned policy in
+`.github/pre-push-gate.json` through `scripts/pre-push-gate.py`. CI repeats the
+gate on `main`. Security is always reviewed; backup/restore, updater, embedded
+Documentation and affected technical docs are reviewed when relevant. Apply
+SEO/GEO checks to intentionally public/indexable surfaces and concealment,
+crawler and probe-resistance checks to private or authenticated surfaces.
+Every area requires `PASS` evidence or a reasoned `N/A`.
+
 `updater` is a local host tool for applying checksummed releases of Exocortex head
 services. It is deliberately not a general central deployment service. The one
 central-control bridge is deliberately narrow: the local Neptune daemon may ask
@@ -63,7 +79,15 @@ Install one explicit immutable Updater release with Updater's own bootstrap
 
 ```sh
 curl -fsSL https://github.com/psewdon1m-exocortex/updater/releases/download/updater-vX.Y.Z/bootstrap.sh | sudo sh
+sudo chmod 600 /etc/exocortex/updater/.env
+updater status
 ```
+
+The Part 04 target is a prepare/edit/install boundary. Updater currently has no
+operator-input field and its bootstrap installs the daemon immediately after
+verification; this is a documented service-specific variation, not permission
+for head-service bootstraps to start their applications. If an operator input
+is added later, Updater must adopt the normal two-stage flow before release.
 
 The protected release job keeps Updater's private signing key in GitHub
 Secrets, derives its public counterpart and embeds only the public key in that

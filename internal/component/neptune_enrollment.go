@@ -230,6 +230,12 @@ func EnrollNeptuneProject(runtimeConfig config.Runtime, headID, projectID, expor
 	if err := os.Chown(projectEnv+".tmp", 0, gid); err != nil {
 		return NeptuneEnrollmentResult{}, err
 	}
+	// Service installers use a restrictive umask. Enforce the intended group
+	// readability after creation so the unprivileged Neptune process can load
+	// the registration file regardless of the caller's inherited umask.
+	if err := os.Chmod(projectEnv+".tmp", 0o640); err != nil {
+		return NeptuneEnrollmentResult{}, err
+	}
 	if err := os.Rename(projectEnv+".tmp", projectEnv); err != nil {
 		return NeptuneEnrollmentResult{}, err
 	}
@@ -256,7 +262,13 @@ func EnrollNeptuneProject(runtimeConfig config.Runtime, headID, projectID, expor
 	}); err != nil {
 		return NeptuneEnrollmentResult{}, err
 	}
-	command := exec.Command("docker", "compose", "--env-file", head.EnvFile, "-f", head.ComposeFile, "up", "-d", head.ComposeService)
+	// Enrollment atomically replaces the per-project token files. A running
+	// container can keep the previous bind-mounted inode when its resolved
+	// Compose configuration is otherwise unchanged, so an ordinary `up -d`
+	// leaves the service able to reach Neptune but unable to authenticate.
+	// Recreate only the enrolled service to bind the new token files without
+	// disturbing any of the other services on the host.
+	command := exec.Command("docker", "compose", "--env-file", head.EnvFile, "-f", head.ComposeFile, "up", "-d", "--no-deps", "--force-recreate", head.ComposeService)
 	command.Dir = head.ProjectDir
 	if output, commandErr := command.CombinedOutput(); commandErr != nil {
 		return NeptuneEnrollmentResult{}, fmt.Errorf("service restart after Neptune enrollment failed: %s", strings.TrimSpace(string(output)))
@@ -363,6 +375,11 @@ func writeSecret(path, value string, gid int) error {
 		return err
 	}
 	if err := os.Chown(temporary, 0, gid); err != nil {
+		return err
+	}
+	// os.WriteFile applies the process umask to the requested mode. Restore the
+	// contract explicitly because Saturn and Volt installers run with umask 077.
+	if err := os.Chmod(temporary, 0o640); err != nil {
 		return err
 	}
 	return os.Rename(temporary, path)
