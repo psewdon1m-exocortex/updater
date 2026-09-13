@@ -29,6 +29,7 @@ const gryphonApp = "/usr/local/lib/gryphon/app"
 const gryphonSocket = "/run/gryphon/client.sock"
 const gryphonUnit = "/etc/systemd/system/gryphon.service"
 const gryphonControl = "/usr/local/sbin/gryphon"
+const gryphonReleaseTagPrefix = "gryphon-v"
 
 var gryphonUpdateLock sync.Mutex
 
@@ -84,16 +85,7 @@ func CheckGryphon(runtimeConfig config.Runtime, headID, currentVersion string) (
 	if err := json.NewDecoder(io.LimitReader(response.Body, 4*1024*1024)).Decode(&releases); err != nil {
 		return GryphonReleaseCheck{}, err
 	}
-	available := ""
-	for _, release := range releases {
-		if release.Draft || release.Prerelease || !strings.HasPrefix(release.TagName, "gryphon-linux-v") {
-			continue
-		}
-		candidate := strings.TrimPrefix(release.TagName, "gryphon-linux-v")
-		if neptuneVersion.MatchString(candidate) && (available == "" || compareVersion(candidate, available) > 0) {
-			available = candidate
-		}
-	}
+	available := latestQualifiedReleaseVersion(releases, gryphonReleaseTagPrefix)
 	result := GryphonReleaseCheck{InstalledVersion: currentVersion, AvailableVersion: available}
 	result.UpdateAvailable = available != "" && compareVersion(available, currentVersion) > 0
 	return result, nil
@@ -155,7 +147,7 @@ func UpdateGryphon(runtimeConfig config.Runtime, headID, version string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(runtimeConfig.CommandTimeoutSec)*time.Second)
 	defer cancel()
 	client := &http.Client{Timeout: 30 * time.Second}
-	release, err := fetchRelease(ctx, client, owner, repository, "gryphon-linux-v"+version)
+	release, err := fetchRelease(ctx, client, owner, repository, gryphonReleaseTagPrefix+version)
 	if err != nil {
 		return err
 	}

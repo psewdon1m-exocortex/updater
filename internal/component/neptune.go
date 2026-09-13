@@ -32,6 +32,7 @@ const neptuneBinary = "/usr/local/lib/neptune/neptuned"
 const neptuneSocket = "/run/neptune/neptuned.sock"
 const neptuneUnit = "/etc/systemd/system/neptune.service"
 const neptuneControl = "/usr/local/sbin/neptunectl"
+const neptuneReleaseTagPrefix = "neptune-v"
 
 var neptuneVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$`)
 var neptuneUpdateLock sync.Mutex
@@ -59,6 +60,20 @@ type NeptuneReleaseCheck struct {
 	InstalledVersion string `json:"installed_version"`
 	AvailableVersion string `json:"available_version,omitempty"`
 	UpdateAvailable  bool   `json:"update_available"`
+}
+
+func latestQualifiedReleaseVersion(releases []githubRelease, prefix string) string {
+	available := ""
+	for _, release := range releases {
+		if release.Draft || release.Prerelease || !strings.HasPrefix(release.TagName, prefix) {
+			continue
+		}
+		candidate := strings.TrimPrefix(release.TagName, prefix)
+		if neptuneVersion.MatchString(candidate) && (available == "" || compareVersion(candidate, available) > 0) {
+			available = candidate
+		}
+	}
+	return available
 }
 
 func CheckNeptune(runtimeConfig config.Runtime, headID, currentVersion string) (NeptuneReleaseCheck, error) {
@@ -98,16 +113,7 @@ func CheckNeptune(runtimeConfig config.Runtime, headID, currentVersion string) (
 	if err := json.NewDecoder(io.LimitReader(response.Body, 4*1024*1024)).Decode(&releases); err != nil {
 		return NeptuneReleaseCheck{}, err
 	}
-	available := ""
-	for _, release := range releases {
-		if release.Draft || release.Prerelease || !strings.HasPrefix(release.TagName, "neptune-linux-v") {
-			continue
-		}
-		candidate := strings.TrimPrefix(release.TagName, "neptune-linux-v")
-		if neptuneVersion.MatchString(candidate) && (available == "" || compareVersion(candidate, available) > 0) {
-			available = candidate
-		}
-	}
+	available := latestQualifiedReleaseVersion(releases, neptuneReleaseTagPrefix)
 	result := NeptuneReleaseCheck{InstalledVersion: currentVersion, AvailableVersion: available}
 	result.UpdateAvailable = available != "" && compareVersion(available, currentVersion) > 0
 	return result, nil
@@ -139,7 +145,7 @@ func InstallLatestNeptune(runtimeConfig config.Runtime, headID string) (string, 
 		return "", err
 	}
 	if check.AvailableVersion == "" {
-		return "", errors.New("no Neptune Linux release is available")
+		return "", errors.New("no Neptune release is available")
 	}
 	if current != "0.0.0" && !check.UpdateAvailable {
 		return current, nil
@@ -229,7 +235,7 @@ func UpdateNeptune(runtimeConfig config.Runtime, headID, version string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(runtimeConfig.CommandTimeoutSec)*time.Second)
 	defer cancel()
 	client := &http.Client{Timeout: 30 * time.Second}
-	release, err := fetchRelease(ctx, client, owner, repository, "neptune-linux-v"+version)
+	release, err := fetchRelease(ctx, client, owner, repository, neptuneReleaseTagPrefix+version)
 	if err != nil {
 		return err
 	}

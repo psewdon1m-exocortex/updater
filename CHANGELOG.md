@@ -4,6 +4,14 @@ Normative behavior is governed by [Part 00 — system unification
 specification](https://github.com/psewdon1m-exocortex/general/blob/main/PART_00_SYSTEM_UNIFICATION_SPECIFICATION.md); changelog
 entries are historical evidence and do not override it.
 
+## 0.4.5
+
+- Discover and fetch Gryphon releases only from the canonical
+  `gryphon-vMAJOR.MINOR.PATCH` namespace.
+- Discover and fetch the Linux artifact from Neptune's unified
+  `neptune-vMAJOR.MINOR.PATCH` release.
+- Reject the superseded platform-qualified helper tag namespaces.
+
 ## 0.4.4
 
 - Restore group-readable Neptune project and credential files even when a head

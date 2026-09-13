@@ -22,6 +22,24 @@ func TestGithubRepositoryAndVersionOrdering(t *testing.T) {
 	}
 }
 
+func TestLatestQualifiedReleaseVersionRejectsLegacyAndUnpublishedTags(t *testing.T) {
+	releases := []githubRelease{
+		{TagName: "neptune-linux-v9.9.9"},
+		{TagName: "neptune-v0.1.4"},
+		{TagName: "neptune-v0.1.5", Draft: true},
+		{TagName: "neptune-v0.1.6", Prerelease: true},
+		{TagName: "neptune-v0.2.0"},
+		{TagName: "gryphon-linux-v8.8.8"},
+		{TagName: "gryphon-v0.1.2"},
+	}
+	if actual := latestQualifiedReleaseVersion(releases, neptuneReleaseTagPrefix); actual != "0.2.0" {
+		t.Fatalf("unexpected Neptune candidate %q", actual)
+	}
+	if actual := latestQualifiedReleaseVersion(releases, gryphonReleaseTagPrefix); actual != "0.1.2" {
+		t.Fatalf("unexpected Gryphon candidate %q", actual)
+	}
+}
+
 func TestUpdateEnvFilePreservesUnrelatedValues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".env")
 	if err := os.WriteFile(path, []byte("# operator input\nKEEP=value\nNEPTUNE_SOCKET_GID=old\n"), 0o600); err != nil {
