@@ -16,6 +16,16 @@ SEO/GEO checks to intentionally public/indexable surfaces and concealment,
 crawler and probe-resistance checks to private or authenticated surfaces.
 Every area requires `PASS` evidence or a reasoned `N/A`.
 
+## Required pre-release known-problem gate
+
+Before a service-qualified release is finalized, evaluate every active ID in
+[Part 12](https://github.com/psewdon1m-exocortex/general/blob/main/PART_12_KNOWN_DEPLOYMENT_AND_OPERATIONS_PROBLEMS.md) against the exact candidate. Retain
+`known-problems-report.json` bound to the service revision, qualified tag,
+immutable central-documentation revision and catalog digest. Missing, stale,
+failed, unknown or unsupported `N/A` evidence blocks publication. This is a
+normative release requirement; until the repository workflow generates and
+enforces that report, the release pipeline remains an implementation gap.
+
 `updater` is a local host tool for applying checksummed releases of Exocortex head
 services. It is deliberately not a general central deployment service. The one
 central-control bridge is deliberately narrow: the local Neptune daemon may ask

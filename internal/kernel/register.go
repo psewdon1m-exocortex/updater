@@ -43,7 +43,9 @@ func Load(kernelURL, token, cachePath string, timeout time.Duration) (Snapshot, 
 	if cacheValid {
 		req.Header.Set("If-None-Match", `"`+cached.Revision+`"`)
 	}
-	client := &http.Client{Timeout: timeout}
+	client := &http.Client{Timeout: timeout, CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
 	response, remoteErr := client.Do(req)
 	if remoteErr == nil {
 		defer response.Body.Close()
@@ -104,6 +106,9 @@ func setDotted(values map[string]interface{}, key, value string) {
 	parts := strings.Split(key, ".")
 	current := values
 	for _, part := range parts[:len(parts)-1] {
+		if current[part] == nil {
+			current[part] = map[string]interface{}{}
+		}
 		current = current[part].(map[string]interface{})
 	}
 	current[parts[len(parts)-1]] = value
@@ -116,8 +121,11 @@ func resolveSnapshot(kernelURL, token string, snapshot Snapshot, client *http.Cl
 	}
 	keys := make([]string, 0, len(references))
 	for key := range references {
-		keys = append(keys, key)
+		if updaterMetadataKey(key) {
+			keys = append(keys, key)
+		}
 	}
+	snapshot.Values = map[string]interface{}{}
 	sort.Strings(keys)
 	for start := 0; start < len(keys); start += 20 {
 		end := start + 20
@@ -150,6 +158,20 @@ func resolveSnapshot(kernelURL, token string, snapshot Snapshot, client *http.Cl
 		}
 	}
 	return snapshot, nil
+}
+
+// Updater consumes release locations and Saturn enrollment coordinates only.
+// Never resolve application credentials merely because a head was added to Register.
+func updaterMetadataKey(key string) bool {
+	if key == "services.saturn.sni" || key == "services.saturn.port" {
+		return true
+	}
+	for _, service := range []string{"kernel", "volt", "saturn", "chronos", "laboratory", "neptune", "gryphon", "updater"} {
+		if key == "repositories."+service+".url" {
+			return true
+		}
+	}
+	return false
 }
 
 func verify(snapshot Snapshot) error {

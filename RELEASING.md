@@ -4,6 +4,9 @@ This document specializes [Part 05 — CI/CD and release
 security](https://github.com/psewdon1m-exocortex/general/blob/main/PART_05_CI_RELEASES_AND_LOCAL_UPDATES.md) for this service. If
 the two documents differ, Part 05 is authoritative.
 
+The [Part 12 known-problem gate](https://github.com/psewdon1m-exocortex/general/blob/main/PART_12_KNOWN_DEPLOYMENT_AND_OPERATIONS_PROBLEMS.md) is also mandatory for every qualified release. Its revision-bound
+`known-problems-report.json` is release evidence, not an optional checklist.
+
 Updater releases use tags in the form `updater-vMAJOR.MINOR.PATCH`. The
 version sequence starts at `0.0.1`. A plain tag such as `v0.0.1` invokes
 verification-only CI and must not publish or mutate a release; only the

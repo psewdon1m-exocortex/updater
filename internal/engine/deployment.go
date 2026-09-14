@@ -55,7 +55,7 @@ func readDeployment(bundle, service string) (map[string][]byte, error) {
 			}
 			return errors.New("deployment bundle links and special files are forbidden")
 		}
-		if !wanted[name] {
+		if !wanted[name] && !((service == "chronos" || service == "laboratory") && name == ".env.example") {
 			return nil
 		}
 		if size > 1024*1024 {
@@ -125,10 +125,14 @@ func readDeployment(bundle, service string) (map[string][]byte, error) {
 }
 
 func deploymentTarget(head config.HeadConfig, name string) (string, error) {
-	if !deploymentNames(head.Service)[name] {
+	managedEnvironment := (head.Service == "chronos" || head.Service == "laboratory") && name == ".env"
+	if !deploymentNames(head.Service)[name] && !managedEnvironment {
 		return "", errors.New("invalid deployment target")
 	}
 	target := filepath.Join(head.ProjectDir, filepath.FromSlash(name))
+	if managedEnvironment {
+		target = head.EnvFile
+	}
 	if name == "compose.production.yaml" {
 		target = filepath.Join(head.ProjectDir, head.ComposeFile)
 	}
@@ -243,7 +247,8 @@ func restoreDeployment(head config.HeadConfig, snapshot string) error {
 	if err = json.Unmarshal(body, &files); err != nil {
 		return err
 	}
-	if len(files) != len(deploymentNames(head.Service)) {
+	additionalEnvironment := (head.Service == "chronos" || head.Service == "laboratory") && len(files) == len(deploymentNames(head.Service))+1
+	if len(files) != len(deploymentNames(head.Service)) && !additionalEnvironment {
 		return errors.New("deployment snapshot is incomplete")
 	}
 	seen := map[string]bool{}
@@ -268,5 +273,53 @@ func restoreDeployment(head config.HeadConfig, snapshot string) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// The signed template supplies missing safe defaults. Existing operator values,
+// credentials and comments remain byte-for-byte, and the full prior env is part
+// of the protected deployment rollback snapshot. No template is executed.
+func prepareHeadEnvironment(head config.HeadConfig, files map[string][]byte) error {
+	template, present := files[".env.example"]
+	if !present {
+		return nil
+	}
+	delete(files, ".env.example")
+	if head.Service != "chronos" && head.Service != "laboratory" {
+		return errors.New("unexpected environment migration")
+	}
+	original, err := os.ReadFile(head.EnvFile)
+	if err != nil {
+		return err
+	}
+	if len(original) > 1024*1024 {
+		return errors.New("head environment exceeds limit")
+	}
+	existing := map[string]bool{}
+	for _, line := range strings.Split(string(original), "\n") {
+		if k, _, ok := strings.Cut(line, "="); ok {
+			existing[strings.TrimSpace(k)] = true
+		}
+	}
+	merged := strings.TrimRight(string(original), "\r\n") + "\n"
+	for _, line := range strings.Split(string(template), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok || existing[k] {
+			continue
+		}
+		if strings.ContainsAny(k, " \t\r\n\x00") || strings.ContainsAny(v, "\r\n\x00") {
+			return errors.New("invalid signed environment default")
+		}
+		if strings.Contains(v, "CHANGE_ME") || strings.HasPrefix(v, "replace-") || strings.HasPrefix(v, "change-") {
+			continue
+		}
+		merged += k + "=" + v + "\n"
+		existing[k] = true
+	}
+	files[".env"] = []byte(merged)
 	return nil
 }

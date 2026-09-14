@@ -18,7 +18,7 @@ func InitializeGryphon(runtime config.Runtime, headID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if head.Service != "saturn" {
+	if !ConsumesHelper(head.Service, "gryphon") {
 		return "", errors.New("this head does not consume Gryphon")
 	}
 	if gryphonInstallationComplete() {

@@ -30,13 +30,12 @@ func ReconcileHostHelpers(runtime config.Runtime, store *state.Store) {
 			continue
 		}
 		needed := []string{}
-		switch head.Service {
-		case "kernel", "volt", "saturn":
+		if ConsumesHelper(head.Service, "neptune") {
 			if !neptuneInstallationComplete() {
 				needed = append(needed, "neptune")
 			}
 		}
-		if head.Service == "saturn" && !gryphonInstallationComplete() {
+		if ConsumesHelper(head.Service, "gryphon") && !gryphonInstallationComplete() {
 			needed = append(needed, "gryphon")
 		}
 		for _, helper := range needed {

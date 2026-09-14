@@ -44,7 +44,7 @@ func (s Server) lifecycle(mux *http.ServeMux) {
 				writeError(w, 400, err)
 				return
 			}
-			if kind != "updater-self-update" && head.Service != "saturn" {
+			if kind != "updater-self-update" && !component.ConsumesHelper(head.Service, "gryphon") {
 				writeError(w, 403, errors.New("head does not consume Gryphon"))
 				return
 			}

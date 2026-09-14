@@ -243,6 +243,10 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 		fail(err)
 		return
 	}
+	if err := prepareHeadEnvironment(head, deployment); err != nil {
+		fail(err)
+		return
+	}
 	update("ARTIFACT_VERIFIED", "release manifest, checksums and immutable image digest verified")
 	if e.runtime.DryRun {
 		job.State, job.Message = "COMPLETED", "dry-run completed without changing the host"

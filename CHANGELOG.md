@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.6 — unreleased
+
+- Limit Kernel resolution to supported release repository URLs and Saturn enrollment coordinates; never retrieve unrelated application credentials. Reject Kernel HTTP redirects before forwarding credentials.
+
+- Authorize signed Chronos/Laboratory release scopes and reuse shared helpers with explicit consumer capabilities.
+- Support Chronos Neptune/Gryphon and Laboratory Neptune lifecycle through head interfaces.
+- Apply signed head Compose/env defaults while retaining operator values and full rollback state.
+- Add head update/failure recovery and capability regressions; preserve migrations from 0.4.3 and 0.4.4.
+
 Normative behavior is governed by [Part 00 — system unification
 specification](https://github.com/psewdon1m-exocortex/general/blob/main/PART_00_SYSTEM_UNIFICATION_SPECIFICATION.md); changelog
 entries are historical evidence and do not override it.

@@ -57,7 +57,7 @@ func ConnectGryphonBot(runtime config.Runtime, headID, alias, token string) erro
 	if err != nil {
 		return err
 	}
-	if head.Service != "saturn" {
+	if !ConsumesHelper(head.Service, "gryphon") {
 		return errors.New("this head does not consume Gryphon")
 	}
 	if !regexp.MustCompile(`^[a-z][a-z0-9-]{1,47}$`).MatchString(alias) || !regexp.MustCompile(`^[0-9]{5,}:[A-Za-z0-9_-]{20,200}$`).MatchString(token) {
