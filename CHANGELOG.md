@@ -1,6 +1,15 @@
 # Changelog
 
-## 0.4.6 — unreleased
+## 0.4.7 — unreleased
+
+- Preserve Neptune and Gryphon runtime directories across service restarts so
+  running containers retain their Unix-socket bind mounts.
+- Install verified helper systemd units together with helper upgrades and roll
+  back both the unit and executable/application if activation fails.
+- Detect and repair stale Updater, Neptune and Gryphon socket-directory mounts
+  for every running registered head.
+
+## 0.4.6
 
 - Limit Kernel resolution to supported release repository URLs and Saturn enrollment coordinates; never retrieve unrelated application credentials. Reject Kernel HTTP redirects before forwarding credentials.
 

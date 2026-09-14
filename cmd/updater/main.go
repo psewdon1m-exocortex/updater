@@ -21,7 +21,7 @@ import (
 	"updater/internal/state"
 )
 
-var version = "0.4.6"
+var version = "0.4.7"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -51,28 +51,30 @@ func main() {
 			OnReady: func() {
 				go func() {
 					// Reconcile after the socket is available and allow manual jobs
-					// to take the same host lock. Missing bootstrap data is retried.
+					// to take the same host lock. Missing bootstrap data and stale
+					// helper socket mounts are retried.
 					time.Sleep(5 * time.Second)
 					for {
 						component.ReconcileHostHelpers(runtime, store)
+						if release, lockErr := store.BeginOperation(""); lockErr == nil {
+							ctx, cancel := context.WithTimeout(
+								context.Background(),
+								time.Duration(runtime.CommandTimeoutSec)*time.Second,
+							)
+							report := repairer.Repair(ctx)
+							cancel()
+							release()
+							if len(report.Recreated) > 0 {
+								fmt.Printf("recreated stale helper socket mounts for: %s\n", strings.Join(report.Recreated, ", "))
+							}
+							for _, warning := range report.Warnings {
+								fmt.Fprintf(os.Stderr, "helper socket mount repair warning: %s\n", warning)
+							}
+						}
 						time.Sleep(time.Minute)
 					}
 				}()
 				go monitorSupervisors(store)
-				go func() {
-					ctx, cancel := context.WithTimeout(
-						context.Background(),
-						time.Duration(runtime.CommandTimeoutSec)*time.Second,
-					)
-					defer cancel()
-					report := repairer.Repair(ctx)
-					if len(report.Recreated) > 0 {
-						fmt.Printf("recreated stale updater socket mounts for: %s\n", strings.Join(report.Recreated, ", "))
-					}
-					for _, warning := range report.Warnings {
-						fmt.Fprintf(os.Stderr, "updater socket mount repair warning: %s\n", warning)
-					}
-				}()
 			},
 		}
 		fmt.Printf("updater %s listening on %s\n", version, runtime.SocketPath)

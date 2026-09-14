@@ -31,6 +31,7 @@ import (
 const neptuneBinary = "/usr/local/lib/neptune/neptuned"
 const neptuneSocket = "/run/neptune/neptuned.sock"
 const neptuneUnit = "/etc/systemd/system/neptune.service"
+const neptuneManagedUnit = "/etc/exocortex/units/neptune.service"
 const neptuneControl = "/usr/local/sbin/neptunectl"
 const neptuneReleaseTagPrefix = "neptune-v"
 
@@ -278,8 +279,11 @@ func UpdateNeptune(runtimeConfig config.Runtime, headID, version string) error {
 	if err := verifySHA256(archivePath, manifest.SHA256); err != nil {
 		return err
 	}
-	newBinary := filepath.Join(staging, "neptuned.new")
-	if err := extractNeptuneBinary(archivePath, newBinary); err != nil {
+	upgrade := filepath.Join(staging, "upgrade")
+	if err := extractNeptuneUpgradeFiles(archivePath, upgrade); err != nil {
+		return err
+	}
+	if err := validatePreservedRuntimeUnit(filepath.Join(upgrade, "neptune.service"), "neptune"); err != nil {
 		return err
 	}
 	if runtimeConfig.DryRun {
@@ -288,29 +292,7 @@ func UpdateNeptune(runtimeConfig config.Runtime, headID, version string) error {
 	if !neptuneInstallationComplete() {
 		return installFreshNeptune(ctx, archivePath, staging, head)
 	}
-	installCandidate := neptuneBinary + ".new"
-	if err := copyFile(newBinary, installCandidate, 0o755); err != nil {
-		return err
-	}
-	defer os.Remove(installCandidate)
-	previous := neptuneBinary + ".previous"
-	if err := copyFile(neptuneBinary, previous, 0o755); err != nil {
-		return err
-	}
-	if err := os.Rename(installCandidate, neptuneBinary); err != nil {
-		return err
-	}
-	if err := restartNeptune(ctx); err == nil {
-		_ = os.Remove(previous)
-		return nil
-	} else {
-		if restoreErr := os.Rename(previous, neptuneBinary); restoreErr != nil {
-			return errors.Join(err, restoreErr)
-		}
-		rollbackContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		return errors.Join(err, restartNeptune(rollbackContext))
-	}
+	return replaceNeptune(ctx, filepath.Join(upgrade, "neptuned"), filepath.Join(upgrade, "neptune.service"))
 }
 
 func neptuneInstallationComplete() bool {
@@ -320,6 +302,76 @@ func neptuneInstallationComplete() bool {
 		}
 	}
 	return true
+}
+
+func extractNeptuneUpgradeFiles(archivePath, target string) error {
+	if err := os.Mkdir(target, 0o700); err != nil {
+		return err
+	}
+	return extractNeptuneFiles(archivePath, target, map[string]int64{
+		"neptuned":        192 * 1024 * 1024,
+		"neptune.service": 1024 * 1024,
+	})
+}
+
+func replaceNeptune(ctx context.Context, binarySource, unitSource string) error {
+	unitTarget, err := managedSystemdUnit(neptuneUnit, neptuneManagedUnit)
+	if err != nil {
+		return err
+	}
+	binaryCandidate, binaryPrevious := neptuneBinary+".new", neptuneBinary+".previous"
+	unitCandidate, unitPrevious := unitTarget+".new", unitTarget+".previous"
+	for _, target := range []string{binaryCandidate, binaryPrevious, unitCandidate, unitPrevious} {
+		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	defer func() {
+		_ = os.Remove(binaryCandidate)
+		_ = os.Remove(unitCandidate)
+	}()
+	if err := copyFile(binarySource, binaryCandidate, 0o755); err != nil {
+		return err
+	}
+	if err := copyFile(unitSource, unitCandidate, 0o644); err != nil {
+		return err
+	}
+	if err := copyFile(neptuneBinary, binaryPrevious, 0o755); err != nil {
+		return err
+	}
+	if err := copyFile(unitTarget, unitPrevious, 0o644); err != nil {
+		_ = os.Remove(binaryPrevious)
+		return err
+	}
+	if err := os.Rename(unitCandidate, unitTarget); err != nil {
+		return err
+	}
+	if err := os.Rename(binaryCandidate, neptuneBinary); err != nil {
+		restoreErr := os.Rename(unitPrevious, unitTarget)
+		return errors.Join(err, restoreErr)
+	}
+	activationErr := daemonReload(ctx)
+	if activationErr == nil {
+		activationErr = restartNeptune(ctx)
+	}
+	if activationErr == nil {
+		_ = os.Remove(binaryPrevious)
+		_ = os.Remove(unitPrevious)
+		return nil
+	}
+
+	rollbackContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	restoreErr := errors.Join(
+		os.Rename(binaryPrevious, neptuneBinary),
+		os.Rename(unitPrevious, unitTarget),
+	)
+	if reloadErr := daemonReload(rollbackContext); reloadErr != nil {
+		restoreErr = errors.Join(restoreErr, reloadErr)
+	} else {
+		restoreErr = errors.Join(restoreErr, restartNeptune(rollbackContext))
+	}
+	return errors.Join(activationErr, restoreErr)
 }
 
 func installFreshNeptune(ctx context.Context, archivePath, staging string, head config.HeadConfig) error {

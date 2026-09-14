@@ -28,6 +28,7 @@ import (
 const gryphonApp = "/usr/local/lib/gryphon/app"
 const gryphonSocket = "/run/gryphon/client.sock"
 const gryphonUnit = "/etc/systemd/system/gryphon.service"
+const gryphonManagedUnit = "/etc/exocortex/units/gryphon.service"
 const gryphonControl = "/usr/local/sbin/gryphon"
 const gryphonReleaseTagPrefix = "gryphon-v"
 
@@ -194,6 +195,9 @@ func UpdateGryphon(runtimeConfig config.Runtime, headID, version string) error {
 	if err := extractGryphonApp(archivePath, extracted, version); err != nil {
 		return err
 	}
+	if err := validatePreservedRuntimeUnit(filepath.Join(extracted, "packaging", "linux", "gryphon.service"), "gryphon"); err != nil {
+		return err
+	}
 	if runtimeConfig.DryRun {
 		return nil
 	}
@@ -312,7 +316,7 @@ func extractGryphonApp(archivePath, target, version string) error {
 			return fmt.Errorf("Gryphon release entry %s is truncated", name)
 		}
 	}
-	for _, required := range []string{"package.json", "dist/main.js", "dist/cli.js"} {
+	for _, required := range []string{"package.json", "dist/main.js", "dist/cli.js", "packaging/linux/gryphon.service"} {
 		if info, err := os.Stat(filepath.Join(target, filepath.FromSlash(required))); err != nil || info.IsDir() {
 			return fmt.Errorf("Gryphon release does not contain %s", required)
 		}
@@ -358,9 +362,19 @@ func copyTree(source, target string) error {
 }
 
 func replaceGryphon(ctx context.Context, extracted string) error {
+	unitTarget, err := managedSystemdUnit(gryphonUnit, gryphonManagedUnit)
+	if err != nil {
+		return err
+	}
 	candidate, previous, failed := gryphonApp+".new", gryphonApp+".previous", gryphonApp+".failed"
+	unitCandidate, unitPrevious := unitTarget+".new", unitTarget+".previous"
 	for _, target := range []string{candidate, previous, failed} {
 		if err := os.RemoveAll(target); err != nil {
+			return err
+		}
+	}
+	for _, target := range []string{unitCandidate, unitPrevious} {
+		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
@@ -368,6 +382,13 @@ func replaceGryphon(ctx context.Context, extracted string) error {
 		return err
 	}
 	defer os.RemoveAll(candidate)
+	defer os.Remove(unitCandidate)
+	if err := copyFile(filepath.Join(candidate, "packaging", "linux", "gryphon.service"), unitCandidate, 0o644); err != nil {
+		return err
+	}
+	if err := copyFile(unitTarget, unitPrevious, 0o644); err != nil {
+		return err
+	}
 	if err := os.Rename(gryphonApp, previous); err != nil {
 		return err
 	}
@@ -375,21 +396,38 @@ func replaceGryphon(ctx context.Context, extracted string) error {
 		_ = os.Rename(previous, gryphonApp)
 		return err
 	}
-	if err := restartGryphon(ctx); err == nil {
-		return os.RemoveAll(previous)
-	} else {
-		if moveErr := os.Rename(gryphonApp, failed); moveErr != nil {
-			return errors.Join(err, moveErr)
-		}
-		if moveErr := os.Rename(previous, gryphonApp); moveErr != nil {
-			return errors.Join(err, moveErr)
-		}
-		rollbackContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		rollbackErr := restartGryphon(rollbackContext)
-		_ = os.RemoveAll(failed)
-		return errors.Join(err, rollbackErr)
+	if err := os.Rename(unitCandidate, unitTarget); err != nil {
+		restoreErr := restoreGryphonApp(previous, failed)
+		_ = os.Remove(unitPrevious)
+		return errors.Join(err, restoreErr)
 	}
+	activationErr := daemonReload(ctx)
+	if activationErr == nil {
+		activationErr = restartGryphon(ctx)
+	}
+	if activationErr == nil {
+		_ = os.Remove(unitPrevious)
+		return os.RemoveAll(previous)
+	}
+	appRestoreErr := restoreGryphonApp(previous, failed)
+	unitRestoreErr := os.Rename(unitPrevious, unitTarget)
+	rollbackContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	rollbackErr := daemonReload(rollbackContext)
+	if rollbackErr == nil {
+		rollbackErr = restartGryphon(rollbackContext)
+	}
+	return errors.Join(activationErr, appRestoreErr, unitRestoreErr, rollbackErr)
+}
+
+func restoreGryphonApp(previous, failed string) error {
+	if err := os.Rename(gryphonApp, failed); err != nil {
+		return err
+	}
+	if err := os.Rename(previous, gryphonApp); err != nil {
+		return errors.Join(err, os.Rename(failed, gryphonApp))
+	}
+	return os.RemoveAll(failed)
 }
 
 func restartGryphon(ctx context.Context) error {

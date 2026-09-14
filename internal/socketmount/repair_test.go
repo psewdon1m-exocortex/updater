@@ -43,6 +43,57 @@ func TestRepairRecreatesOnlyAStaleBindMount(t *testing.T) {
 	}
 }
 
+func TestRepairRecreatesHeadWithStaleNeptuneMount(t *testing.T) {
+	repairer, updaterDirectory := testRepairer(t)
+	neptuneDirectory := filepath.Join(t.TempDir(), "run", "neptune")
+	if err := os.MkdirAll(neptuneDirectory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	staleNeptuneDirectory := t.TempDir()
+	repairer.directories = append(repairer.directories, watchedDirectory{Name: "neptune", Path: neptuneDirectory})
+	repairer.inspectContainer = func(context.Context, string) (containerState, error) {
+		return containerState{
+			State: struct {
+				PID int `json:"Pid"`
+			}{PID: 42},
+			Mounts: []containerMount{
+				{Source: updaterDirectory, Destination: "/run/exocortex"},
+				{Source: neptuneDirectory, Destination: "/run/neptune"},
+			},
+		}, nil
+	}
+	repairer.processMountPath = func(_ int, destination string) string {
+		if destination == "/run/neptune" {
+			return staleNeptuneDirectory
+		}
+		return updaterDirectory
+	}
+	recreated := 0
+	repairer.recreate = func(context.Context, config.HeadConfig) error {
+		recreated++
+		return nil
+	}
+
+	report := repairer.Repair(context.Background())
+	if recreated != 1 || len(report.Recreated) != 1 || report.Recreated[0] != "kernel" || len(report.Warnings) != 0 {
+		t.Fatalf("unexpected repair report: %#v", report)
+	}
+}
+
+func TestRepairSkipsMissingOptionalHelperDirectories(t *testing.T) {
+	repairer, hostDirectory := testRepairer(t)
+	repairer.directories = append(repairer.directories,
+		watchedDirectory{Name: "neptune", Path: filepath.Join(t.TempDir(), "missing-neptune")},
+		watchedDirectory{Name: "gryphon", Path: filepath.Join(t.TempDir(), "missing-gryphon")},
+	)
+	repairer.processMountPath = func(int, string) string { return hostDirectory }
+
+	report := repairer.Repair(context.Background())
+	if len(report.Warnings) != 0 || len(report.Recreated) != 0 {
+		t.Fatalf("unexpected repair report: %#v", report)
+	}
+}
+
 func testRepairer(t *testing.T) (*Repairer, string) {
 	t.Helper()
 	directory := t.TempDir()
@@ -75,6 +126,7 @@ UPDATER_CONTROL_TOKEN=control-token-long-enough
 		t.Fatal(err)
 	}
 	repairer := New(runtime)
+	repairer.directories = []watchedDirectory{{Name: "updater", Path: hostDirectory, Required: true}}
 	repairer.inspectContainer = func(context.Context, string) (containerState, error) {
 		return containerState{
 			State: struct {

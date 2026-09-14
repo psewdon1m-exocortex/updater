@@ -60,7 +60,7 @@ func TestUpdateEnvFilePreservesUnrelatedValues(t *testing.T) {
 	}
 }
 
-func TestExtractNeptuneBinarySelectsOnlyExactEntry(t *testing.T) {
+func TestExtractNeptuneUpgradeSelectsBinaryAndUnit(t *testing.T) {
 	directory := t.TempDir()
 	archivePath := filepath.Join(directory, "release.tar.gz")
 	file, err := os.Create(archivePath)
@@ -69,12 +69,19 @@ func TestExtractNeptuneBinarySelectsOnlyExactEntry(t *testing.T) {
 	}
 	gzipWriter := gzip.NewWriter(file)
 	tarWriter := tar.NewWriter(gzipWriter)
-	payload := []byte("neptune-binary")
-	if err := tarWriter.WriteHeader(&tar.Header{Name: "./neptuned", Mode: 0o755, Size: int64(len(payload)), Typeflag: tar.TypeReg}); err != nil {
-		t.Fatal(err)
+	entries := map[string]string{
+		"./neptuned":        "neptune-binary",
+		"./neptune.service": "[Service]\nRuntimeDirectoryPreserve=yes\n",
+		"./ignored":         "not extracted",
 	}
-	if _, err := tarWriter.Write(payload); err != nil {
-		t.Fatal(err)
+	for name, value := range entries {
+		payload := []byte(value)
+		if err := tarWriter.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(payload)), Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tarWriter.Write(payload); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := tarWriter.Close(); err != nil {
 		t.Fatal(err)
@@ -85,15 +92,22 @@ func TestExtractNeptuneBinarySelectsOnlyExactEntry(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(directory, "neptuned")
-	if err := extractNeptuneBinary(archivePath, target); err != nil {
+	target := filepath.Join(directory, "upgrade")
+	if err := extractNeptuneUpgradeFiles(archivePath, target); err != nil {
 		t.Fatal(err)
 	}
-	actual, err := os.ReadFile(target)
+	actual, err := os.ReadFile(filepath.Join(target, "neptuned"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(actual) != string(payload) {
+	if string(actual) != entries["./neptuned"] {
 		t.Fatalf("unexpected payload %q", actual)
+	}
+	unit, err := os.ReadFile(filepath.Join(target, "neptune.service"))
+	if err != nil || !strings.Contains(string(unit), "RuntimeDirectoryPreserve=yes") {
+		t.Fatalf("unexpected unit %q: %v", unit, err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "ignored")); !os.IsNotExist(err) {
+		t.Fatal("unexpected release member was extracted")
 	}
 }

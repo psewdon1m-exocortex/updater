@@ -34,31 +34,61 @@ type Report struct {
 	Warnings  []string
 }
 
+type watchedDirectory struct {
+	Name     string
+	Path     string
+	Required bool
+}
+
 type Repairer struct {
 	runtime          config.Runtime
+	directories      []watchedDirectory
 	inspectContainer func(context.Context, string) (containerState, error)
 	processMountPath func(int, string) string
 	recreate         func(context.Context, config.HeadConfig) error
 }
 
 func New(runtime config.Runtime) *Repairer {
-	repairer := &Repairer{runtime: runtime}
+	repairer := &Repairer{
+		runtime: runtime,
+		directories: []watchedDirectory{
+			{Name: "updater", Path: filepath.Clean(filepath.Dir(runtime.SocketPath)), Required: true},
+			{Name: "neptune", Path: "/run/neptune"},
+			{Name: "gryphon", Path: "/run/gryphon"},
+		},
+	}
 	repairer.inspectContainer = inspectContainer
 	repairer.processMountPath = processMountPath
 	repairer.recreate = recreate
 	return repairer
 }
 
-// Repair recreates only running head containers whose updater socket directory
-// is bound to an inode that is no longer reachable through the host path. This
-// can happen when an older updater.service removes and recreates its systemd
-// RuntimeDirectory while Docker keeps the original bind mount alive.
+// Repair recreates only running head containers whose Updater, Neptune or
+// Gryphon socket directory is bound to an inode that is no longer reachable
+// through the current host path. RuntimeDirectoryPreserve prevents this during
+// normal upgrades; this reconciliation also repairs legacy units, manual
+// stop/start cycles and interrupted host recovery.
 func (r *Repairer) Repair(ctx context.Context) Report {
 	report := Report{}
-	hostDirectory := filepath.Clean(filepath.Dir(r.runtime.SocketPath))
-	hostInfo, err := os.Stat(hostDirectory)
-	if err != nil {
-		report.Warnings = append(report.Warnings, fmt.Sprintf("stat updater socket directory: %v", err))
+	type availableDirectory struct {
+		name string
+		path string
+		info os.FileInfo
+	}
+	available := make([]availableDirectory, 0, len(r.directories))
+	for _, watched := range r.directories {
+		hostDirectory := filepath.Clean(watched.Path)
+		hostInfo, err := os.Stat(hostDirectory)
+		if errors.Is(err, os.ErrNotExist) && !watched.Required {
+			continue
+		}
+		if err != nil {
+			report.Warnings = append(report.Warnings, fmt.Sprintf("stat %s socket directory: %v", watched.Name, err))
+			continue
+		}
+		available = append(available, availableDirectory{name: watched.Name, path: hostDirectory, info: hostInfo})
+	}
+	if len(available) == 0 {
 		return report
 	}
 	registry, err := config.LoadRegistry(r.runtime.RegistryPath)
@@ -83,21 +113,32 @@ func (r *Repairer) Repair(ctx context.Context) Report {
 			// installation. Its first start will bind the current directory.
 			continue
 		}
-		destination := mountDestination(container.Mounts, hostDirectory, hostInfo)
-		if destination == "" {
-			continue
+		checked := false
+		stale := []string{}
+		for _, directory := range available {
+			destination := mountDestination(container.Mounts, directory.path, directory.info)
+			if destination == "" {
+				continue
+			}
+			checked = true
+			mountedInfo, statErr := os.Stat(r.processMountPath(container.State.PID, destination))
+			if statErr == nil && os.SameFile(directory.info, mountedInfo) {
+				continue
+			}
+			if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+				report.Warnings = append(report.Warnings, fmt.Sprintf("head %s: inspect mounted %s socket directory: %v", id, directory.name, statErr))
+				continue
+			}
+			stale = append(stale, directory.name)
 		}
-		report.Checked = append(report.Checked, id)
-		mountedInfo, statErr := os.Stat(r.processMountPath(container.State.PID, destination))
-		if statErr == nil && os.SameFile(hostInfo, mountedInfo) {
-			continue
+		if checked {
+			report.Checked = append(report.Checked, id)
 		}
-		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-			report.Warnings = append(report.Warnings, fmt.Sprintf("head %s: inspect mounted socket directory: %v", id, statErr))
+		if len(stale) == 0 {
 			continue
 		}
 		if recreateErr := r.recreate(ctx, head); recreateErr != nil {
-			report.Warnings = append(report.Warnings, fmt.Sprintf("head %s: %v", id, recreateErr))
+			report.Warnings = append(report.Warnings, fmt.Sprintf("head %s: repair stale %s socket mount: %v", id, strings.Join(stale, ", "), recreateErr))
 			continue
 		}
 		report.Recreated = append(report.Recreated, id)
@@ -148,7 +189,7 @@ func recreate(ctx context.Context, head config.HeadConfig) error {
 	command.Dir = head.ProjectDir
 	output, err := command.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("recreate stale updater socket mount: %s", strings.TrimSpace(string(output)))
+		return fmt.Errorf("recreate service: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
 }

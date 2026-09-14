@@ -28,10 +28,11 @@ func TestExtractGryphonAppValidatesPackageIdentity(t *testing.T) {
 	gzipWriter := gzip.NewWriter(file)
 	tarWriter := tar.NewWriter(gzipWriter)
 	entries := map[string]string{
-		"package.json": `{"name":"@exocortex/gryphon","version":"1.2.3"}`,
-		"dist/main.js": "console.log('daemon')",
-		"dist/cli.js":  "console.log('cli')",
-		"ignored.txt":  "must not be extracted",
+		"package.json":                    `{"name":"@exocortex/gryphon","version":"1.2.3"}`,
+		"dist/main.js":                    "console.log('daemon')",
+		"dist/cli.js":                     "console.log('cli')",
+		"packaging/linux/gryphon.service": "[Service]\nRuntimeDirectoryPreserve=yes\n",
+		"ignored.txt":                     "must not be extracted",
 	}
 	for name, value := range entries {
 		payload := []byte(value)

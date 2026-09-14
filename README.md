@@ -147,16 +147,20 @@ server-managed Nginx.
 - local and optional public health checks gate success;
 - a failed health check restores the previous image and imports the backup;
 - request IDs are idempotent and job state survives updater restarts.
-- daemon startup repairs a registered head container automatically when its
-  updater socket directory still points at an obsolete bind-mount inode.
+- daemon reconciliation repairs a running registered head automatically when
+  its Updater, Neptune or Gryphon socket directory points at an obsolete
+  bind-mount inode. The helper units also preserve their runtime directories
+  across normal restarts, so an update does not ordinarily require container
+  recreation.
 - Gryphon Linux updates resolve `repositories.gryphon.url`, verify the
   `exocortex.gryphon.release.v1` manifest and archive checksum, atomically swap
-  `/usr/local/lib/gryphon/app`, and roll back when the client-socket health
-  probe does not recover.
+  `/usr/local/lib/gryphon/app` together with the verified systemd unit, and
+  roll back both when the client-socket health probe does not recover.
 - Neptune remote updates use a separate root-owned bridge token and Unix-socket
   endpoint. They accept only a registered head ID plus a semantic Neptune
-  version; repository resolution, manifest/checksum verification, atomic swap,
-  health check, and rollback remain inside Updater.
+  version; repository resolution, manifest/checksum verification, atomic
+  executable/unit replacement, health check, and rollback remain inside
+  Updater.
 
 The worker retains at most 20 finished jobs/backups and removes finished data
 older than 30 days. The systemd journal is rate-limited to 200 messages per
@@ -185,7 +189,7 @@ updater version
 
 `neptune install` bootstraps the host-wide daemon from the newest Linux release
 allowed by the already trusted, signed Neptune manifest when it is absent and
-uses the same rollback-safe binary replacement for later upgrades. It never
+uses the same rollback-safe executable and systemd-unit replacement for later upgrades. It never
 learns first-install trust from a key beside that release. `neptune enroll`
 reads a 15-minute single-use Saturn code from standard input, creates isolated
 local tokens, registers the project, updates its existing `.env`, and recreates
