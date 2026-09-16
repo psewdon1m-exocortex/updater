@@ -23,11 +23,10 @@ type deploymentFile struct {
 // Only versioned deployment files are applied. Environment, trust, state and
 // bundled installers are never executed or overwritten by an application update.
 func deploymentNames(service string) map[string]bool {
-	names := map[string]bool{"compose.production.yaml": true}
-	if service == "saturn" {
-		names["infra/production/Caddyfile"] = true
-	}
-	return names
+	// The host ingress is operator-owned. In particular, Saturn is published
+	// through the server's Nginx configuration, so application releases must
+	// neither require nor overwrite an embedded reverse-proxy configuration.
+	return map[string]bool{"compose.production.yaml": true}
 }
 
 func readDeployment(bundle, service string) (map[string][]byte, error) {
@@ -246,6 +245,23 @@ func restoreDeployment(head config.HeadConfig, snapshot string) error {
 	var files []deploymentFile
 	if err = json.Unmarshal(body, &files); err != nil {
 		return err
+	}
+	// Updater releases through 0.4.7 included Saturn's retired Caddyfile in
+	// rollback snapshots. Keep those snapshots usable for Compose rollback, but
+	// deliberately leave the operator-owned server ingress untouched.
+	if head.Service == "saturn" {
+		filtered := make([]deploymentFile, 0, len(files))
+		seen := map[string]bool{}
+		for _, file := range files {
+			if seen[file.Name] {
+				return errors.New("duplicate deployment snapshot member")
+			}
+			seen[file.Name] = true
+			if file.Name != "infra/production/Caddyfile" {
+				filtered = append(filtered, file)
+			}
+		}
+		files = filtered
 	}
 	additionalEnvironment := (head.Service == "chronos" || head.Service == "laboratory") && len(files) == len(deploymentNames(head.Service))+1
 	if len(files) != len(deploymentNames(head.Service)) && !additionalEnvironment {

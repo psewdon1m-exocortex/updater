@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -89,12 +90,72 @@ func TestDeploymentSwitchAndRollbackPreserveEnvironment(t *testing.T) {
 			if data, _ := os.ReadFile(env); string(data) != "operator-owned" {
 				t.Fatal("operator environment changed")
 			}
-			if service == "saturn" {
-				if _, err = os.Stat(filepath.Join(head.ProjectDir, "infra/production/Caddyfile")); !os.IsNotExist(err) {
-					t.Fatal("new-only deployment file survived rollback")
-				}
-			}
 		})
+	}
+}
+
+func TestSaturnDeploymentRequiresOnlyComposeAndIgnoresRetiredCaddyfile(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "saturn.zip")
+	f, err := os.Create(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := zip.NewWriter(f)
+	for name, data := range map[string]string{
+		"compose.production.yaml":        "services: {}\n",
+		"infra/production/Caddyfile":     "retired embedded proxy\n",
+		"infra/production/nginx.example": "operator reference only\n",
+	} {
+		out, createErr := w.Create(name)
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		if _, writeErr := out.Write([]byte(data)); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+	if err = w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := readDeployment(filename, "saturn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || string(files["compose.production.yaml"]) != "services: {}\n" {
+		t.Fatalf("unexpected Saturn deployment files: %#v", files)
+	}
+}
+
+func TestSaturnLegacySnapshotRestoresComposeWithoutTouchingCaddyfile(t *testing.T) {
+	dir := t.TempDir()
+	head := config.HeadConfig{Service: "saturn", ProjectDir: dir, ComposeFile: "compose.production.yaml"}
+	compose := filepath.Join(dir, head.ComposeFile)
+	if err := os.WriteFile(compose, []byte("new compose"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := filepath.Join(dir, "deployment.json")
+	legacy, err := json.Marshal([]deploymentFile{
+		{Name: "compose.production.yaml", Existed: true, Data: []byte("old compose")},
+		{Name: "infra/production/Caddyfile", Existed: true, Data: []byte("old caddy")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(snapshot, legacy, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = restoreDeployment(head, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if data, readErr := os.ReadFile(compose); readErr != nil || string(data) != "old compose" {
+		t.Fatalf("Compose was not restored: %q, %v", data, readErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "infra", "production", "Caddyfile")); !os.IsNotExist(statErr) {
+		t.Fatal("retired Caddyfile was restored")
 	}
 }
 

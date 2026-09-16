@@ -1,6 +1,14 @@
 # Changelog
 
-## 0.4.7 — unreleased
+## 0.4.8 — unreleased
+
+- Stop requiring or applying Saturn's retired embedded Caddy configuration;
+  Saturn releases now update Compose only while server Nginx remains
+  operator-owned.
+- Preserve rollback compatibility with legacy Saturn deployment snapshots
+  without recreating the retired Caddyfile.
+
+## 0.4.7
 
 - Preserve Neptune and Gryphon runtime directories across service restarts so
   running containers retain their Unix-socket bind mounts.
