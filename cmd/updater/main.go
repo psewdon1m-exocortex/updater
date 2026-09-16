@@ -21,7 +21,7 @@ import (
 	"updater/internal/state"
 )
 
-var version = "0.4.8"
+var version = "0.4.9"
 
 func main() {
 	if len(os.Args) < 2 {

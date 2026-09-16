@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.4.8 — unreleased
+## 0.4.9 — unreleased
+
+- Permit atomic replacement of Saturn's `/etc/vault/.env.production` inside
+  the otherwise strict Updater systemd filesystem sandbox.
+
+## 0.4.8
 
 - Stop requiring or applying Saturn's retired embedded Caddy configuration;
   Saturn releases now update Compose only while server Nginx remains
