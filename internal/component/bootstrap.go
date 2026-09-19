@@ -38,6 +38,11 @@ func ReconcileHostHelpers(runtime config.Runtime, store *state.Store) {
 		if ConsumesHelper(head.Service, "gryphon") && !gryphonInstallationComplete() {
 			needed = append(needed, "gryphon")
 		}
+		if ConsumesHelper(head.Service, "wyvern") {
+			if _, err := ReadWyvernLink(id); err != nil {
+				needed = append(needed, "wyvern")
+			}
+		}
 		for _, helper := range needed {
 			release, err := store.BeginOperation("")
 			if err != nil {
@@ -64,6 +69,8 @@ func ReconcileHostHelpers(runtime config.Runtime, store *state.Store) {
 			}
 			if helper == "neptune" {
 				job.Version, err = InstallLatestNeptune(runtime, id)
+			} else if helper == "wyvern" {
+				job.Version, err = EnsureWyvern(runtime, id, job.ID)
 			} else {
 				job.Version, err = InitializeGryphon(runtime, id)
 			}

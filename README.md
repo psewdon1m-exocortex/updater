@@ -189,7 +189,10 @@ synthetic data and needs neither root nor installed services. In normal mode,
 the console connects to the separate root-only operator socket. Install the
 matching Updater binary and systemd unit before using it. Accepted jobs continue
 after the SSH session closes; reopen operation history to observe their result.
-Neptune schedules remain in Saturn. Wyvern is shown as a future integration.
+Neptune schedules remain in Saturn. Wyvern has shared runtime diagnostics,
+masked Kernel/Adapter management, client grants and signed lifecycle operations.
+Its external configuration remains authoritative in Kernel/Volt; updating the
+runtime never rolls those services back.
 See [Terminal console](docs/TUI.md) for actions, trust boundaries, terminal
 compatibility and verification. An ordinary SSH PTY is required; Termius itself
 does not need an Exocortex plugin.

@@ -23,6 +23,8 @@ func InstalledVersion(kind string) (string, error) {
 
 func runningVersionEndpoint(kind string) (string, string, string, error) {
 	switch kind {
+	case "wyvern":
+		return "/run/wyvern-admin/admin.sock", "/v1/status", "exocortex.wyvern.status.v1", nil
 	case "neptune":
 		return neptuneSocket, "/v1/health", "", nil
 	case "gryphon":

@@ -2,6 +2,9 @@ package component
 
 // ConsumesHelper is shared by bootstrap reconciliation and protected lifecycle APIs.
 func ConsumesHelper(service, helper string) bool {
+	if helper == "wyvern" {
+		return service == "mastermind" || service == "laboratory"
+	}
 	if helper == "gryphon" {
 		return service == "saturn" || service == "chronos"
 	}

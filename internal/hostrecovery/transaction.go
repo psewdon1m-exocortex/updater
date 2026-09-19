@@ -69,13 +69,21 @@ func RecoverInterrupted(root string) error {
 		return errors.New("invalid recovery journal")
 	}
 	var plan []transactionRoot
-	if json.Unmarshal(body, &plan) != nil || len(plan) != len(roots) {
+	if json.Unmarshal(body, &plan) != nil || len(plan) < 6 || len(plan) > len(roots) {
 		return errors.New("invalid recovery journal")
 	}
+	lastIndex := -1
 	for index, item := range plan {
-		if item.Root != roots[index] {
+		position := -1
+		for i, value := range roots {
+			if value == item.Root {
+				position = i
+			}
+		}
+		if position <= lastIndex || index < 6 && item.Root != roots[index] {
 			return errors.New("invalid recovery journal order")
 		}
+		lastIndex = position
 		target, err := fixedRoot(root, item.Root)
 		if err != nil {
 			return err
@@ -141,7 +149,20 @@ func Apply(root string, entries []Entry, verify func() error) error {
 		seen[entry.Name] = true
 	}
 	plan := []transactionRoot{}
-	for _, relative := range roots {
+	for index, relative := range roots {
+		if index >= 6 {
+			included := false
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name, relative+"/") {
+					included = true
+				}
+			}
+			// Older archives have no Wyvern state and must preserve a separately
+			// installed gateway rather than erase its current identities.
+			if !included {
+				continue
+			}
+		}
 		target, err := fixedRoot(root, relative)
 		if err != nil {
 			return err

@@ -23,7 +23,7 @@ import (
 	"updater/internal/tui"
 )
 
-var version = "0.5.0"
+var version = "0.6.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -154,6 +154,8 @@ func main() {
 		fmt.Println("updater was updated successfully")
 	case "neptune":
 		handleNeptune(runtime, os.Args[2:])
+	case "wyvern":
+		handleWyvern(runtime, os.Args[2:])
 	case "gryphon":
 		if len(os.Args) != 5 || os.Args[2] != "install" || os.Args[3] != "--head" {
 			fatal("usage: updater gryphon install --head <id>")

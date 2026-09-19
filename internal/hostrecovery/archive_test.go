@@ -50,6 +50,44 @@ func TestEncryptedCleanRestoreAndRollback(t *testing.T) {
 	}
 }
 
+func TestWyvernRecoveryPreservesIdentitiesAndLegacyArchivesDoNotEraseThem(t *testing.T) {
+	entries := []Entry{
+		{Name: "etc/wyvern/identity/kernel.token", Data: []byte("synthetic-runtime-identity")},
+		{Name: "etc/exocortex/wyvern/manager.json", Data: []byte(`{"manager_token":"synthetic-manager"}`)},
+		{Name: "etc/exocortex/wyvern/clients/mastermind/link.json", Data: []byte(`{"token":"synthetic-client"}`)},
+		{Name: "var/lib/wyvern/media.json", Data: []byte(`{"records":[]}`)},
+	}
+	archive, err := Seal(entries, "synthetic recovery passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(archive, []byte("synthetic-runtime-identity")) {
+		t.Fatal("plaintext identity exposed")
+	}
+	decoded, err := Open(archive, "synthetic recovery passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := Apply(root, decoded, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(root, []Entry{{Name: "var/lib/gryphon/state.db", Data: []byte("legacy")}}, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		body, err := os.ReadFile(filepath.Join(root, entry.Name))
+		if err != nil || !bytes.Equal(body, entry.Data) {
+			t.Fatal("legacy archive erased Wyvern state", entry.Name, err)
+		}
+	}
+	for _, name := range []string{"etc/wyvern/wyvern.env", "etc/exocortex/units/wyvern.service", "var/lib/updater/components/wyvern/current.json"} {
+		if _, err := Seal([]Entry{{Name: name, Data: []byte("executable-state")}}, "synthetic recovery passphrase"); err == nil {
+			t.Fatal("executable deployment state was accepted", name)
+		}
+	}
+}
+
 func TestRejectEscapingExecutableAndSymlinkTargets(t *testing.T) {
 	for _, name := range []string{"../etc/passwd", "/etc/passwd", "etc/exocortex/units/updater.service", "etc/neptune/script.sh"} {
 		if _, err := Seal([]Entry{{Name: name, Data: []byte("x")}}, "synthetic recovery passphrase"); err == nil {

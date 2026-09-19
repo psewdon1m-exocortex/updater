@@ -23,10 +23,40 @@ import (
 var operatorID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 var operatorRequestID = regexp.MustCompile(`^[a-zA-Z0-9-]{16,128}$`)
 
+type operatorDispatchKey struct{}
+
 // This handler is installed ONLY on the separate root-only listener. The
 // service-mounted listener never exposes any of these operator routes.
 func (s Server) operatorHandler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/wyvern/config", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		config, err := s.wyvernManager().Configuration(ctx)
+		if err != nil {
+			writeError(w, 503, err)
+			return
+		}
+		for id, adapter := range config.Config.Adapters {
+			adapter.CredentialRef = ""
+			config.Config.Adapters[id] = adapter
+		}
+		for id, client := range config.Config.Clients {
+			client.TokenHash = ""
+			config.Config.Clients[id] = client
+		}
+		writeJSON(w, 200, config)
+	})
+	mux.HandleFunc("GET /v1/wyvern", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		view, err := console.ReadWyvern(ctx, s.wyvernSocket())
+		if err != nil {
+			writeError(w, 503, err)
+			return
+		}
+		writeJSON(w, 200, view)
+	})
 	mux.HandleFunc("GET /v1/overview", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 		defer cancel()
@@ -93,7 +123,7 @@ func operatorDecode(w http.ResponseWriter, r *http.Request, target any) bool {
 }
 
 func (s Server) operatorHead(id, kind string) (config.HeadConfig, error) {
-	if !operatorID.MatchString(id) || (kind != "updater" && kind != "neptune" && kind != "gryphon") {
+	if !operatorID.MatchString(id) || (kind != "updater" && kind != "neptune" && kind != "gryphon" && kind != "wyvern") {
 		return config.HeadConfig{}, errors.New("Unknown component or registered service")
 	}
 	head, err := config.LoadHead(s.Runtime, id)
@@ -129,7 +159,7 @@ func (s Server) operatorSnapshot(ctx context.Context) console.Snapshot {
 			entry.Problem = "Incomplete configuration"
 		} else {
 			entry.Service = console.Text(head.Service)
-			for _, helper := range []string{"neptune", "gryphon"} {
+			for _, helper := range []string{"neptune", "gryphon", "wyvern"} {
 				if component.ConsumesHelper(head.Service, helper) {
 					entry.Helpers = append(entry.Helpers, helper)
 				}
@@ -163,7 +193,7 @@ func (s Server) operatorSnapshot(ctx context.Context) console.Snapshot {
 }
 
 func jobComponent(service string) string {
-	for _, kind := range []string{"updater", "neptune", "gryphon"} {
+	for _, kind := range []string{"updater", "neptune", "gryphon", "wyvern"} {
 		if service == kind || strings.HasPrefix(service, kind+"-") {
 			return kind
 		}
@@ -199,6 +229,18 @@ func operatorJob(job model.Job) console.Job {
 func (s Server) operatorAction(w http.ResponseWriter, r *http.Request) {
 	var action console.Action
 	if !operatorDecode(w, r, &action) {
+		return
+	}
+	if action.Component == "wyvern" && action.Kind != "install" && action.Kind != "update" {
+		if !operatorRequestID.MatchString(action.RequestID) {
+			writeError(w, 400, errors.New("A valid operation request ID is required"))
+			return
+		}
+		if err := console.ValidateAction(action); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		s.wyvernAction(w, action)
 		return
 	}
 	head, err := s.operatorHead(action.HeadID, action.Component)
@@ -240,7 +282,7 @@ func (s Server) operatorAction(w http.ResponseWriter, r *http.Request) {
 	// Re-enter only a fixed, typed existing route, using the daemon-owned head
 	// credential. No client-supplied path, header or executable is forwarded.
 	body, _ := json.Marshal(payload)
-	request, _ := http.NewRequestWithContext(r.Context(), "POST", "http://updater.local"+path, bytes.NewReader(body))
+	request, _ := http.NewRequestWithContext(context.WithValue(r.Context(), operatorDispatchKey{}, true), "POST", "http://updater.local"+path, bytes.NewReader(body))
 	request.Header.Set("X-Updater-Token", head.ControlToken)
 	request.Header.Set("Content-Type", "application/json")
 	response := &operatorResponse{header: http.Header{}}

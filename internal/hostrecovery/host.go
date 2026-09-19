@@ -59,7 +59,7 @@ func ResumeInterruptedHost() error {
 			return errors.New("invalid helper restart journal")
 		}
 		for _, unit := range saved {
-			if unit != "neptune.service" && unit != "gryphon.service" {
+			if unit != "neptune.service" && unit != "gryphon.service" && unit != "wyvern.service" {
 				return errors.New("invalid helper restart unit")
 			}
 			found := false
@@ -90,7 +90,7 @@ func ResumeInterruptedHost() error {
 
 func runningHelpers() []string {
 	result := []string{}
-	for _, unit := range []string{"neptune.service", "gryphon.service"} {
+	for _, unit := range []string{"neptune.service", "gryphon.service", "wyvern.service"} {
 		if exec.Command("systemctl", "is-active", "--quiet", unit).Run() == nil {
 			result = append(result, unit)
 		}
@@ -174,7 +174,10 @@ func ownership() error {
 			if entry.Type()&os.ModeSymlink != 0 {
 				return errors.New("unexpected recovery symlink")
 			}
-			currentGID := gid
+			currentUID, currentGID := uid, gid
+			if strings.HasPrefix(filename, "/var/lib/wyvern") || strings.HasPrefix(filename, "/etc/wyvern/identity") || strings.HasPrefix(filename, "/etc/exocortex/wyvern/clients/") {
+				currentUID, currentGID = 10001, 10001
+			}
 			if strings.HasPrefix(filename, "/etc/neptune/clients") {
 				clientGroup, err := user.LookupGroup("neptune-clients")
 				if err != nil {
@@ -182,7 +185,7 @@ func ownership() error {
 				}
 				currentGID, _ = strconv.Atoi(clientGroup.Gid)
 			}
-			if err := os.Chown(filename, uid, currentGID); err != nil {
+			if err := os.Chown(filename, currentUID, currentGID); err != nil {
 				return err
 			}
 			mode := os.FileMode(0600)
@@ -190,6 +193,18 @@ func ownership() error {
 				mode = 0700
 			}
 			if strings.HasPrefix(filename, "/etc/") {
+				mode = 0640
+				if entry.IsDir() {
+					mode = 0750
+				}
+			}
+			if strings.HasPrefix(filename, "/etc/exocortex/wyvern") || strings.HasPrefix(filename, "/etc/wyvern/identity") {
+				mode = 0600
+				if entry.IsDir() {
+					mode = 0700
+				}
+			}
+			if strings.HasPrefix(filename, "/etc/exocortex/wyvern/clients/") {
 				mode = 0640
 				if entry.IsDir() {
 					mode = 0750
@@ -205,6 +220,10 @@ func ownership() error {
 }
 func health(unit string) error {
 	socket, host := "/run/neptune/neptuned.sock", "neptune.local"
+	route := "/v1/health"
+	if unit == "wyvern.service" {
+		socket, host, route = "/run/wyvern-admin/admin.sock", "wyvern.local", "/health/ready"
+	}
 	if unit == "gryphon.service" {
 		socket, host = "/run/gryphon/client.sock", "gryphon.local"
 	}
@@ -214,7 +233,7 @@ func health(unit string) error {
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 2 * time.Second}
 	for attempt := 0; attempt < 30; attempt++ {
-		response, err := client.Get("http://" + host + "/v1/health")
+		response, err := client.Get("http://" + host + route)
 		if err == nil {
 			response.Body.Close()
 			if response.StatusCode == 200 {
@@ -239,9 +258,9 @@ func Restore(archive []byte, password string) error {
 		}
 	}()
 	wanted := []string{}
-	for _, unit := range []string{"neptune", "gryphon"} {
+	for _, unit := range []string{"neptune", "gryphon", "wyvern"} {
 		for _, entry := range entries {
-			if strings.HasPrefix(entry.Name, "var/lib/"+unit+"/") {
+			if strings.HasPrefix(entry.Name, "var/lib/"+unit+"/") || unit == "wyvern" && strings.HasPrefix(entry.Name, "etc/wyvern/identity/") {
 				if _, err := os.Stat("/etc/systemd/system/" + unit + ".service"); err != nil {
 					return fmt.Errorf("install trusted %s binaries before recovery", unit)
 				}

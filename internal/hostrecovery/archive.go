@@ -24,7 +24,7 @@ import (
 const MaxBytes = 128 * 1024 * 1024
 const magic = "EXOCORTEX-HELPER-RECOVERY-1\n"
 
-var roots = []string{"etc/neptune", "etc/gryphon", "var/lib/neptune", "var/lib/gryphon", "var/lib/updater/jobs", "var/lib/updater/backups"}
+var roots = []string{"etc/neptune", "etc/gryphon", "var/lib/neptune", "var/lib/gryphon", "var/lib/updater/jobs", "var/lib/updater/backups", "etc/wyvern/identity", "etc/exocortex/wyvern", "var/lib/wyvern"}
 
 type Entry struct {
 	Name string
@@ -192,8 +192,9 @@ func validateData(entry Entry) error {
 			BackupPath string `json:"backup_path"`
 			HeadID     string `json:"head_id"`
 			ID         string `json:"id"`
+			Service    string `json:"service"`
 		}
-		if json.Unmarshal(entry.Data, &job) != nil || !regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`).MatchString(job.HeadID) || path.Base(entry.Name) != job.ID+".json" {
+		if json.Unmarshal(entry.Data, &job) != nil || (!regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`).MatchString(job.HeadID) && !(job.HeadID == "" && strings.HasPrefix(job.Service, "wyvern-"))) || path.Base(entry.Name) != job.ID+".json" {
 			return errors.New("invalid restored Updater job")
 		}
 		if job.BackupPath != "" && (!strings.HasPrefix(job.BackupPath, "/var/lib/updater/backups/") || path.Clean(job.BackupPath) != job.BackupPath) {

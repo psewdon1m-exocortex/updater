@@ -175,6 +175,59 @@ def main():
         legacy.abort()
         raise
 
+    wyvern = Terminal(binary, columns=100, rows=32)
+    try:
+        wyvern.expect("SERVICE APPLICATIONS")
+        wyvern.expect("CONNECTED")
+        wyvern.send(b"\x1b[B" * 3 + b"\r")
+        wyvern.expect("Adapters and client bindings")
+        wyvern.send(b"\x1b[B\r")
+        wyvern.expect("CLIENT BINDINGS")
+        wyvern.expect("Adapter not selected")
+        wyvern.send(b"\x1b")
+        wyvern.expect("Reload configuration")
+        wyvern.send(b"\x1b[B" * 3 + b"\r")
+        wyvern.expect("CONFIRM / Wyvern")
+        wyvern.expect("all clients")
+        wyvern.send(b"\r")
+        wyvern.expect("Pause new requests (drain)")
+        wyvern.send(b"\x1b[B" * 3 + b"\r")
+        wyvern.expect("CONFIRM / Wyvern")
+        wyvern.send(b"\x1b[B\r")
+        wyvern.expect("State: COMPLETED")
+        wyvern.finish()
+        checks.append("Wyvern Adapter/binding diagnostics, unbound readiness, host-scope confirmation and durable receipt")
+    except BaseException:
+        wyvern.abort()
+        if args.output:
+            args.output.mkdir(parents=True, exist_ok=True)
+            (args.output / "wyvern-pty-failure.txt").write_text(wyvern.plain(), encoding="utf-8")
+        raise
+
+    connection = Terminal(binary, columns=100, rows=32)
+    try:
+        connection.expect("SERVICE APPLICATIONS")
+        connection.expect("CONNECTED")
+        connection.send(b"\x1b[B" * 3 + b"\r")
+        connection.expect("Connect Kernel")
+        connection.send(b"\x1b[B" * 6 + b"\r")
+        connection.expect("Kernel HTTPS origin")
+        connection.send(b"https://kernel.example.test\r")
+        secret = b"wyvern-pty-secret-canary"
+        connection.send(b"\x1b[200~" + secret + b"\x1b[201~")
+        connection.read(0.2)
+        assert secret not in connection.data
+        connection.send(b"\r\r")
+        connection.expect("CONFIRM / Wyvern")
+        assert secret not in connection.data
+        connection.send(b"\r")
+        connection.expect("Create / edit Google Adapter")
+        connection.finish()
+        checks.append("Wyvern Kernel enrollment form: masked input, explicit confirmation and cancellation")
+    except BaseException:
+        connection.abort()
+        raise
+
     plain = subprocess.run([binary, "tui", "--demo"], input=b"", capture_output=True, timeout=5)
     assert plain.returncode != 0 and b"interactive terminal" in plain.stderr
     assert b"\x1b[?1049h" not in plain.stdout

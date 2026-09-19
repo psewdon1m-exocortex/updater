@@ -40,8 +40,11 @@ fi
 getent group updater >/dev/null 2>&1 || groupadd --system updater
 install -d -o root -g updater -m 0750 /etc/exocortex /run/exocortex
 install -d -o root -g root -m 0755 /etc/exocortex/release-trust
-for trust_service in updater neptune gryphon; do
+for trust_service in updater neptune gryphon wyvern; do
   bundled_trust="$script_dir/release-trust/$trust_service.pem"
+  # Older non-LLM head bundles may omit this optional trust scope. Wyvern
+  # installers require it and VerifyBytes never accepts a missing host pin.
+  if [ "$trust_service" = wyvern ] && [ ! -e "$bundled_trust" ]; then continue; fi
   [ -f "$bundled_trust" ] && [ ! -L "$bundled_trust" ] || {
     echo "The signed Updater bundle has no release-trust/$trust_service.pem." >&2
     exit 5
@@ -88,6 +91,10 @@ install -d -m 0755 /usr/local/lib/updater /usr/local/lib/neptune /usr/local/lib/
 install -d -o root -g updater -m 0750 /etc/exocortex/units
 install -d -o root -g neptune -m 0750 /etc/neptune
 install -d -o root -g gryphon-clients -m 0750 /etc/gryphon
+install -d -o root -g root -m 0755 /etc/wyvern
+install -d -o 10001 -g 10001 -m 0750 /run/wyvern /run/wyvern-admin
+install -d -o 10001 -g 10001 -m 0700 /var/lib/wyvern
+install -d -o root -g root -m 0700 /etc/exocortex/wyvern /etc/exocortex/wyvern/clients
 install -d -o neptune -g neptune -m 0700 /var/lib/neptune
 install -d -o neptune -g neptune -m 0700 /var/cache/neptune
 install -d -o gryphon -g gryphon-clients -m 0700 /var/lib/gryphon

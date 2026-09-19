@@ -70,15 +70,16 @@ type Candidate struct {
 }
 
 type Action struct {
-	Component string `json:"component"`
-	Kind      string `json:"kind"`
-	HeadID    string `json:"head_id"`
-	RequestID string `json:"request_id"`
-	Version   string `json:"version,omitempty"`
-	ExportURL string `json:"export_url,omitempty"`
-	SetupCode string `json:"setup_code,omitempty"`
-	Alias     string `json:"alias,omitempty"`
-	BotToken  string `json:"bot_token,omitempty"`
+	Component string       `json:"component"`
+	Kind      string       `json:"kind"`
+	HeadID    string       `json:"head_id"`
+	RequestID string       `json:"request_id"`
+	Version   string       `json:"version,omitempty"`
+	ExportURL string       `json:"export_url,omitempty"`
+	SetupCode string       `json:"setup_code,omitempty"`
+	Alias     string       `json:"alias,omitempty"`
+	BotToken  string       `json:"bot_token,omitempty"`
+	Wyvern    *WyvernInput `json:"wyvern,omitempty"`
 }
 
 type Bot struct {
@@ -95,6 +96,21 @@ type Backend interface {
 }
 
 func ValidateAction(a Action) error {
+	if a.Component == "wyvern" {
+		if (a.Kind == "install" || a.Kind == "update") && a.Wyvern == nil && a.HeadID != "" && a.ExportURL == "" && a.SetupCode == "" && a.Alias == "" && a.BotToken == "" && ((a.Kind == "install" && a.Version == "") || (a.Kind == "update" && exactVersionPattern.MatchString(a.Version))) {
+			return nil
+		}
+		if a.Wyvern != nil {
+			return validateWyvernAction(a)
+		}
+		if (a.Kind == "reload" || a.Kind == "drain" || a.Kind == "resume" || a.Kind == "repair") && a.HeadID == "" && a.Version == "" && a.ExportURL == "" && a.SetupCode == "" && a.Alias == "" && a.BotToken == "" {
+			return nil
+		}
+		return errors.New("Unsupported Wyvern operation or unexpected fields")
+	}
+	if a.Wyvern != nil {
+		return errors.New("Unexpected Wyvern configuration")
+	}
 	if a.Component != "updater" && a.Component != "neptune" && a.Component != "gryphon" {
 		return errors.New("Unsupported component")
 	}

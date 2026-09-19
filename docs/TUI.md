@@ -3,7 +3,7 @@
 ## Scope and decision
 
 The operator requested an Updater-bundled, arrow-key console for Updater,
-Neptune and Gryphon, with Wyvern reserved for a later integration. The console
+Neptune and Gryphon, later extended by the accepted Wyvern integration plan. The console
 runs on the Linux host over an ordinary SSH PTY, including Termius. It ships in
 the existing binary and release, as `sudo updater tui`. `updater tui --demo`
 uses synthetic data and never contacts a service or changes the host.
@@ -74,7 +74,7 @@ Actual Termius desktop/mobile acceptance must include navigation, paste,
 on-screen keyboard, orientation change, network loss and reconnection. A Linux
 PTY test exercises terminal behavior but is not evidence of a real Termius run.
 
-## Verification results
+## Verification of the original TUI baseline
 
 Verified on September 19, 2026, against the working tree containing protocol-2
 and migration work. Tests ran on Linux in WSL; the target remains a Linux host.
@@ -125,7 +125,7 @@ report is generated after committing and is repeated by CI for the pushed SHA.
 | Updater | Observe process/API/version, check and confirm an exact available update. |
 | Neptune | Observe status, install, enroll a registered service with a Saturn setup code and local export URL, check and confirm updates. |
 | Gryphon | Observe status, install, list bots, connect a bot with masked token input, check and confirm updates. |
-| Wyvern | Planned entry only; no executable action. |
+| Wyvern | Observe runtime/configuration/drain state; connect Kernel; edit Google Adapters/profiles and keys; grant/revoke clients; install/update the signed component; reload, pause/resume and inspect retained host-operation history. |
 
 Release operations require an eligible registered service and its existing
 release configuration. Accepted operations appear in the retained job history.
@@ -133,13 +133,21 @@ The console reconnects after daemon loss and looks up uncertain requests by
 their request ID; it does not automatically resubmit mutations. Diagnostic
 instructions remain available when the operator API is unavailable.
 
-The private API has four routes: `GET /v1/overview`, `GET /v1/bots`,
+The private API has `GET /v1/overview`, `GET /v1/bots`, `GET /v1/wyvern`,
 `POST /v1/check` and `POST /v1/actions`. Its default socket is
 `/run/exocortex-admin/updater.sock`, mode `0600`, with a root peer credential
 check. It is outside the service-mounted `/run/exocortex` directory. Requests
 are limited to 16 KiB, client responses to 512 KiB, and displayed service, bot
 and job lists to 100 items. Job output contains selected metadata and controlled
 summaries rather than raw command output.
+
+## Wyvern integration — 2026-09-19
+
+Wyvern is observed through `/run/wyvern-admin/admin.sock`; it does not need a domain. The overview distinguishes an unconfigured process, a configured runtime, degraded configuration freshness and drain. The Adapter view separately checks whether each linked client has a valid enabled Adapter/profile binding. Runtime readiness alone never means every LLM function is configured.
+
+Reload, drain and resume are root operator actions without a selected head. Their confirmation identifies the impact on all local clients. The service-mounted listener exposes none of these routes. Updater stores the request ID and typed outcome, serializes host operations and returns an existing receipt for retries. The Wyvern producer independently bounds and audits its operations. The catalog response is re-encoded from whitelisted metadata; provider keys, token hashes and credential references are excluded.
+
+Verification: complete Go suite, `go vet`, Linux binary build, focused API/component/console/TUI/recovery race checks and the PTY exercise. Tests cover service-listener denial, unexpected fields, durable receipts, catalog redaction, per-client readiness and shared-scope confirmation. Component/control tests cover activation rollback, interrupted repair, cold/paused updates, CAS publication, enrollment replay, revocation and private link rotation. Recovery tests cover encrypted identity/media metadata archives and legacy roots. Consumer integration is recorded in the Wyvern ledger. These checks use synthetic keys/provider responses and injected host commands; real host and Termius acceptance remain separate.
 
 ## Try the console
 

@@ -60,4 +60,11 @@ UPDATER_CONTROL_TOKEN=synthetic-control-token
 	if len(store.List()) != 1 {
 		t.Fatal("retry created a duplicate")
 	}
+	request := httptest.NewRequest(http.MethodPost, "http://updater.local/v2/components/wyvern/updates", strings.NewReader(`{"head_id":"kernel","request_id":"wyvern-client-update-123","version":"0.0.2"}`))
+	request.Header.Set("X-Updater-Token", "synthetic-control-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != 403 || len(store.List()) != 1 {
+		t.Fatal("consumer can update the shared gateway", response.Code)
+	}
 }

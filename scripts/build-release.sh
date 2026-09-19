@@ -17,6 +17,8 @@ public_key="${RELEASE_PUBLIC_KEY_FILE:-$root/$output/updater.pem}"
   echo "Updater release public key must be exported before building artifacts" >&2
   exit 3
 }
+wyvern_public="${WYVERN_RELEASE_PUBLIC_KEY_FILE:-$root/release-trust/wyvern.pem}"
+[[ -f "$wyvern_public" ]] || { echo "Provide the pinned Wyvern public release key" >&2; exit 3; }
 for helper in neptune gryphon; do
   [[ -f "$root/release-trust/$helper.pem" ]] || {
     echo "Pinned $helper release public key is missing" >&2
@@ -46,6 +48,7 @@ cp "$root/install.sh" "$debroot/usr/share/exocortex-updater/install.sh"
 cp "$root/systemd/updater.service" "$debroot/usr/share/exocortex-updater/systemd/"
 cp "$public_key" "$debroot/usr/share/exocortex-updater/release-trust/updater.pem"
 cp "$root/release-trust/neptune.pem" "$root/release-trust/gryphon.pem" "$debroot/usr/share/exocortex-updater/release-trust/"
+cp "$wyvern_public" "$debroot/usr/share/exocortex-updater/release-trust/wyvern.pem"
 sed "s/^Version: .*/Version: $version/" \
   "$root/packaging/control" > "$debroot/DEBIAN/control"
 cp "$root/packaging/postinst" "$debroot/DEBIAN/postinst"
@@ -65,6 +68,7 @@ cp "$root/install.sh" "$stage/updater/install.sh"
 cp "$root/systemd/updater.service" "$stage/updater/systemd/"
 cp "$public_key" "$stage/updater/release-trust/updater.pem"
 cp "$root/release-trust/neptune.pem" "$root/release-trust/gryphon.pem" "$stage/updater/release-trust/"
+cp "$wyvern_public" "$stage/updater/release-trust/wyvern.pem"
 chmod 0755 "$stage/updater/"{install.sh,updater-linux-amd64}
 tar -czf "$root/$output/updater-${version}-install.tar.gz" -C "$stage" updater
 installer_sha="$(sha256sum "$root/$output/updater-${version}-install.tar.gz" | awk '{print $1}')"

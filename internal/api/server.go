@@ -27,6 +27,9 @@ type Server struct {
 	Engine  *engine.Engine
 	OnReady func()
 	Prepare func() error
+	// Host-owned operator transport. Never derived from service request fields.
+	WyvernSocket  string
+	WyvernManager *component.WyvernManager
 }
 
 func (s Server) Handler() http.Handler {

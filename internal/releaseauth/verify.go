@@ -84,7 +84,7 @@ func downloadLimited(ctx context.Context, client *http.Client, location string, 
 // helper trust. A public key beside a manifest is not an authentication anchor.
 func VerifyDownloaded(ctx context.Context, client *http.Client, manifestPath, signatureURL, service string) error {
 	switch service {
-	case "kernel", "volt", "saturn", "updater", "neptune", "gryphon", "chronos", "laboratory":
+	case "kernel", "volt", "saturn", "updater", "neptune", "gryphon", "chronos", "laboratory", "wyvern":
 	default:
 		return errors.New("unsupported release trust scope")
 	}

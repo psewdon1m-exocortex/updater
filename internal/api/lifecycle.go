@@ -24,7 +24,7 @@ type lifecycleRequest struct {
 var lifecycleStart sync.Mutex
 
 func (s Server) lifecycle(mux *http.ServeMux) {
-	for _, kind := range []string{"gryphon-initialization", "gryphon-bot", "neptune-installation", "updater-self-update"} {
+	for _, kind := range []string{"gryphon-initialization", "gryphon-bot", "neptune-installation", "wyvern-installation", "updater-self-update"} {
 		mux.HandleFunc("POST /v1/lifecycle/"+kind, func(w http.ResponseWriter, r *http.Request) {
 			lifecycleStart.Lock()
 			defer lifecycleStart.Unlock()
@@ -48,6 +48,9 @@ func (s Server) lifecycle(mux *http.ServeMux) {
 			helper := "gryphon"
 			if kind == "neptune-installation" {
 				helper = "neptune"
+			}
+			if kind == "wyvern-installation" {
+				helper = "wyvern"
 			}
 			if kind != "updater-self-update" && !component.ConsumesHelper(head.Service, helper) {
 				writeError(w, 403, errors.New("head does not consume the requested helper"))
@@ -124,6 +127,8 @@ func (s Server) lifecycle(mux *http.ServeMux) {
 						job.Version, err = component.InitializeGryphon(s.Runtime, input.HeadID)
 					} else if kind == "neptune-installation" {
 						job.Version, err = component.InstallLatestNeptune(s.Runtime, input.HeadID)
+					} else if kind == "wyvern-installation" {
+						job.Version, err = component.EnsureWyvern(s.Runtime, input.HeadID, "link-"+job.ID)
 					} else {
 						err = component.ConnectGryphonBot(s.Runtime, input.HeadID, input.Alias, input.BotToken)
 						input.BotToken = ""

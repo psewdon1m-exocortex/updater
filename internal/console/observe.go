@@ -20,9 +20,9 @@ var observedVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:[.-][a-zA-Z0
 // LocalComponents can run even when the operator API is down. It only observes
 // fixed units/paths; no service is started or modified by a status refresh.
 func LocalComponents(ctx context.Context, updaterVersion string) []Component {
-	items := []Component{{ID: "updater"}, {ID: "neptune"}, {ID: "gryphon"}, {ID: "wyvern", Process: "planned", Health: "not integrated", Detail: "Wyvern support is planned; no actions are available."}}
+	items := []Component{{ID: "updater"}, {ID: "neptune"}, {ID: "gryphon"}, {ID: "wyvern"}}
 	var group sync.WaitGroup
-	for index := 0; index < 3; index++ {
+	for index := range items {
 		group.Add(1)
 		go func(i int) {
 			defer group.Done()
@@ -48,6 +48,9 @@ func observe(ctx context.Context, kind string) Component {
 	if kind == "gryphon" {
 		binary, socket, route, schema = "/usr/local/lib/gryphon/app/dist/main.js", "/run/gryphon-admin/admin.sock", "/v1/status", "exocortex.gryphon.status.v1"
 	}
+	if kind == "wyvern" {
+		binary, socket, route, schema = "/etc/exocortex/units/wyvern.service", WyvernAdminSocket, "/v1/status", "exocortex.wyvern.status.v1"
+	}
 	_, statErr := os.Stat(binary)
 	item.Installed = statErr == nil
 	output, err := exec.CommandContext(ctx, "systemctl", "show", "--property=ActiveState", "--value", kind+".service").Output()
@@ -57,13 +60,27 @@ func observe(ctx context.Context, kind string) Component {
 			item.Process = value
 		}
 	}
+	if kind == "wyvern" {
+		var health WyvernStatus
+		if err := LocalJSON(ctx, socket, route, &health); err == nil && ValidWyvernStatus(health) {
+			item.Installed, item.Health, item.Version = true, health.State, health.Version
+			item.Detail = "Wyvern is responding. Adapter selection and readiness are tracked per client."
+			if !health.ConfigurationLoaded {
+				item.Detail = "Wyvern is installed; connect Kernel and configure an Adapter before using LLM functions."
+			}
+			if health.Drain {
+				item.Detail = "New LLM requests are paused for all clients. Active requests can finish."
+			}
+			return item
+		}
+	}
 	var health struct {
 		Schema  string `json:"schema"`
 		Status  string `json:"status"`
 		Version string `json:"version"`
 	}
 	err = LocalJSON(ctx, socket, route, &health)
-	if err == nil && observedVersion.MatchString(health.Version) && (schema == "" && health.Status == "ok" || schema != "" && health.Schema == schema) {
+	if kind != "wyvern" && err == nil && observedVersion.MatchString(health.Version) && (schema == "" && health.Status == "ok" || schema != "" && health.Schema == schema) {
 		item.Installed, item.Health, item.Version = true, "ready", health.Version
 		item.Detail = "Local API is responding with its running version."
 	} else if !item.Installed && errors.Is(statErr, os.ErrNotExist) {

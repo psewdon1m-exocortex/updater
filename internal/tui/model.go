@@ -40,6 +40,8 @@ type replyMsg struct {
 	candidate  *console.Candidate
 	job        *console.Job
 	bots       []console.Bot
+	lines      []string
+	wyvernEdit *console.WyvernEditState
 	kind       string
 	err        error
 }
@@ -113,6 +115,17 @@ func (m Model) menu() []menuItem {
 			items = append(items, menuItem{"List registered bots", "bots"}, menuItem{"Connect a bot", "connect-bot"})
 		}
 		items = append(items, menuItem{"Operation history", "jobs"})
+	}
+	if m.component().ID == "wyvern" {
+		items = append(items, menuItem{"Adapters and client bindings", "adapters"})
+		if m.component().Installed {
+			items = append(items, menuItem{"Reload configuration", "reload"}, menuItem{"Pause new requests (drain)", "drain"}, menuItem{"Resume requests", "resume"})
+		}
+		items = append(items, menuItem{"Operation history", "jobs"})
+		items = append(items, menuItem{"Connect Kernel", "connect-kernel"}, menuItem{"Create / edit Google Adapter", "adapter-put"},
+			menuItem{"Configure Adapter profile", "profile-put"}, menuItem{"Disable Adapter", "adapter-disable"}, menuItem{"Enable Adapter", "adapter-enable"},
+			menuItem{"Delete unused Adapter", "adapter-delete"}, menuItem{"Grant Adapters to client", "client-grant"}, menuItem{"Revoke client", "client-revoke"})
+		items = append(items, menuItem{"Install / link registered service", "install"}, menuItem{"Check for updates", "check"}, menuItem{"Repair runtime", "repair"})
 	}
 	return append(items, menuItem{"Help / diagnostics", "help"}, menuItem{"Back to applications", "back"})
 }
@@ -197,6 +210,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.kind == "bots" {
 			m.botList = msg.bots
 			m.screen = bots
+		}
+		if msg.kind == "adapters" {
+			m.resultLines = msg.lines
+		}
+		if msg.wyvernEdit != nil {
+			return m.openWyvernForm(msg.wyvernEdit.Revision)
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -374,6 +393,37 @@ func (m Model) choose(action string) (tea.Model, tea.Cmd) {
 		m.notice = "A request is still pending. Open operation history to inspect accepted work."
 		return m, nil
 	}
+	if m.component().ID == "wyvern" {
+		if wyvernManagementAction(action) {
+			return m.chooseWyvernManagement(action)
+		}
+		if action == "adapters" {
+			backend, ok := m.backend.(console.WyvernBackend)
+			if !ok {
+				m.notice = "The connected console does not support Wyvern diagnostics"
+				return m, nil
+			}
+			m.generation++
+			generation := m.generation
+			m.working, m.screen = true, result
+			m.candidate, m.activeJob = nil, nil
+			m.resultLines = []string{"Reading Adapters and client bindings..."}
+			return m, func() tea.Msg {
+				ctx, cancel := context.WithTimeout(m.ctx, 8*time.Second)
+				defer cancel()
+				view, err := backend.Wyvern(ctx)
+				return replyMsg{generation: generation, kind: "adapters", lines: wyvernLines(view), err: err}
+			}
+		}
+		if action == "reload" || action == "drain" || action == "resume" || action == "repair" {
+			m.pending = console.Action{Component: "wyvern", Kind: action}
+			m.screen, m.cursor = confirm, 0
+			return m, nil
+		}
+		if action != "install" && action != "check" {
+			return m, nil
+		}
+	}
 	if action == "bots" {
 		m.generation++
 		generation := m.generation
@@ -483,8 +533,8 @@ func (m Model) updateForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		for _, field := range m.fields {
-			if field.input.Value() == "" {
-				m.notice = "Complete both fields before continuing."
+			if field.input.Value() == "" && !(m.choice == "adapter-put" && field.label == "API key (empty keeps existing key)") && !(m.choice == "client-grant" && field.label == "Allowed Adapter IDs (comma separated; empty revokes all)") {
+				m.notice = "Complete the required fields before continuing."
 				return m, nil
 			}
 		}
@@ -499,6 +549,12 @@ func (m Model) updateForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.choice == "connect-bot" {
 			m.pending.Alias = m.fields[0].input.Value()
 			m.pending.BotToken = m.fields[1].input.Value()
+		}
+		if wyvernManagementAction(m.choice) {
+			if err := m.readWyvernForm(); err != nil {
+				m.notice = err.Error()
+				return m, nil
+			}
 		}
 		if err := console.ValidateAction(m.pending); err != nil {
 			m.notice = err.Error()
@@ -585,7 +641,7 @@ func NewDemo() *Demo {
 		{ID: "updater", Installed: true, Process: "active", Health: "ready", Version: "0.5.0", Detail: "Host update worker is responding."},
 		{ID: "neptune", Installed: true, Process: "active", Health: "ready", Version: "0.1.8", Detail: "Backup agent is responding. Schedules are managed in Saturn."},
 		{ID: "gryphon", Process: "inactive", Health: "not installed", Detail: "Install the Telegram gateway to connect a bot."},
-		{ID: "wyvern", Process: "planned", Health: "not integrated", Detail: "Wyvern integration is planned."},
+		{ID: "wyvern", Installed: true, Process: "active", Health: "ready", Version: "0.0.1", Detail: "LLM gateway is responding. Review Adapters and client bindings."},
 	}, Heads: []console.Head{{ID: "kernel", Service: "kernel", Helpers: []string{"neptune"}, ExportURL: "http://127.0.0.1:18180/api/internal/neptune/backup"}, {ID: "saturn", Service: "saturn", Helpers: []string{"neptune", "gryphon"}, ExportURL: "http://127.0.0.1:3000/api/v1/internal/neptune/backup"}}, Jobs: []console.Job{{ID: "demo-previous-job", Component: "neptune", HeadID: "kernel", State: "COMPLETED", Version: "0.1.8", Summary: "Operation completed and verified", UpdatedAt: now, Finished: true}}}}
 }
 func (d *Demo) Snapshot(context.Context) (console.Snapshot, error) {
@@ -627,10 +683,19 @@ func (d *Demo) Act(_ context.Context, a console.Action) (console.Job, error) {
 	for i := range d.snapshot.Components {
 		item := &d.snapshot.Components[i]
 		if item.ID == a.Component {
+			previousHealth := item.Health
 			item.Installed = true
 			item.Process = "active"
 			item.Health = "ready"
 			item.Detail = "DEMO: local API is responding."
+			if a.Component == "wyvern" {
+				if a.Kind == "drain" {
+					item.Health = "draining"
+				}
+				if a.Kind == "reload" {
+					item.Health = previousHealth
+				}
+			}
 			if a.Version != "" {
 				item.Version = a.Version
 			} else if item.Version == "" {

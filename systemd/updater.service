@@ -21,7 +21,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/dev/shm /run/exocortex /run/exocortex-admin -/run/neptune -/run/gryphon -/run/gryphon-admin /var/lib/updater -/var/lib/neptune -/var/lib/gryphon -/var/cache/neptune /etc/exocortex -/etc/neptune -/etc/gryphon -/etc/vault /opt/exocortex -/opt/volt -/opt/vault -/usr/local/lib/neptune -/usr/local/lib/gryphon /usr/local/lib/updater
+ReadWritePaths=/dev/shm /run/exocortex /run/exocortex-admin -/run/neptune -/run/gryphon -/run/gryphon-admin -/run/wyvern -/run/wyvern-admin /var/lib/updater -/var/lib/neptune -/var/lib/gryphon -/var/lib/wyvern -/var/cache/neptune /etc/exocortex -/etc/neptune -/etc/gryphon -/etc/wyvern -/etc/vault /opt/exocortex -/opt/volt -/opt/vault -/usr/local/lib/neptune -/usr/local/lib/gryphon /usr/local/lib/updater
 
 [Install]
 WantedBy=multi-user.target

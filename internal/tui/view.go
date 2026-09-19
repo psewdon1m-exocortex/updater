@@ -193,12 +193,22 @@ func (m Model) rows() []row {
 		}
 	case form:
 		heading(title(component.ID) + " / " + actionLabel(m.pending.Kind))
-		add("Service: " + m.pending.HeadID)
+		if m.pending.Component == "wyvern" {
+			add("Scope: all clients of the local Wyvern instance")
+		} else {
+			add("Service: " + m.pending.HeadID)
+		}
 		if m.choice == "enroll" {
 			add("Create a one-time setup code in Saturn > Synchronization.")
 		}
 		if m.choice == "connect-bot" {
 			add("Bot registration is separate from service and Telegram-user linking.")
+		}
+		if m.choice == "connect-kernel" {
+			add("The Access Key is used for one enrollment and is not retained. This host receives scoped management and runtime identities.")
+		}
+		if m.choice == "adapter-put" {
+			add("A new Adapter needs an API key. Existing clients keep their selected bindings. Declare only capabilities supported by the chosen model.")
 		}
 		add("")
 		for i, field := range m.fields {
@@ -216,7 +226,11 @@ func (m Model) rows() []row {
 	case confirm:
 		heading("CONFIRM / " + title(m.pending.Component))
 		add("Action: " + actionLabel(m.pending.Kind))
-		add("Service: " + m.pending.HeadID)
+		if m.pending.Component == "wyvern" {
+			add("Scope: all clients of the local Wyvern instance")
+		} else {
+			add("Service: " + m.pending.HeadID)
+		}
 		if m.pending.Version != "" {
 			add("Exact version: " + m.pending.Version)
 		}
@@ -235,6 +249,34 @@ func (m Model) rows() []row {
 		}
 		if m.pending.Kind == "update" {
 			add("The shared component may briefly restart. Other local services use this same component.")
+		}
+		if m.pending.Component == "wyvern" {
+			if m.pending.Wyvern != nil {
+				i := m.pending.Wyvern
+				if i.AdapterID != "" {
+					add("Adapter: " + i.AdapterID)
+				}
+				if i.Model != "" {
+					add("Model: " + i.Model)
+				}
+				if i.ClientID != "" {
+					add("Client: " + i.ClientID)
+				}
+				if m.pending.Kind == "client-grant" {
+					add("Removing a grant clears only this client's affected bindings.")
+				}
+				if m.pending.Kind == "adapter-delete" {
+					add("Deletion is refused while any client still uses this Adapter.")
+				}
+			}
+			switch m.pending.Kind {
+			case "drain":
+				add("Pause admission for every client. Running requests can finish.")
+			case "resume":
+				add("Resume admission. Each client still needs a valid Adapter binding.")
+			case "reload":
+				add("Load and validate Kernel/Volt configuration. Invalid changes keep the last working snapshot.")
+			}
 		}
 		add("Accepted work continues if this terminal disconnects.")
 		if m.demo {
@@ -311,6 +353,7 @@ func (m Model) rows() []row {
 			"Release checks need a valid registered service and available Kernel/Volt. Installation independently verifies the selected signed release.",
 			"Neptune: create a setup code in Saturn > Synchronization. Verify the loopback export URL for the selected service. Schedules remain in Saturn.",
 			"Gryphon: connecting a bot does not link a service function or authorize a Telegram user. Those remain separate operations.",
+			"Wyvern: review Adapters and client bindings, reload configuration, pause or resume requests. These actions affect the shared local instance; Adapter editing and signed installation are separate development gates.",
 			"Operation IDs survive console/SSH loss. Reopen operation history after reconnecting. Never assume a lost response means no operation started.",
 			"After Updater self-update, the console reconnects. Relaunch updater tui to use the new UI version. Host/daemon interruption follows existing recovery rules.",
 			"Termius: use an ordinary SSH terminal with a PTY. Resize or rotate the screen freely. Special fonts and mouse support are unnecessary.",
@@ -337,6 +380,28 @@ func actionLabel(kind string) string {
 		return "Connect bot"
 	case "update":
 		return "Update component"
+	case "reload":
+		return "Reload configuration"
+	case "drain":
+		return "Pause new requests"
+	case "resume":
+		return "Resume requests"
+	case "connect-kernel":
+		return "Connect Kernel"
+	case "adapter-put":
+		return "Save Google Adapter"
+	case "profile-put":
+		return "Save Adapter profile"
+	case "adapter-disable":
+		return "Disable Adapter"
+	case "adapter-enable":
+		return "Enable Adapter"
+	case "adapter-delete":
+		return "Delete Adapter"
+	case "client-grant":
+		return "Change client grants"
+	case "client-revoke":
+		return "Revoke client"
 	}
 	return kind
 }

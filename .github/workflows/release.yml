@@ -46,8 +46,13 @@ jobs:
       - name: Build release artifacts
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          WYVERN_RELEASE_PUBLIC_KEY: ${{ vars.WYVERN_RELEASE_PUBLIC_KEY }}
         shell: bash
         run: |
+          test -n "$WYVERN_RELEASE_PUBLIC_KEY"
+          printf '%s\n' "$WYVERN_RELEASE_PUBLIC_KEY" > "$RUNNER_TEMP/wyvern.pem"
+          openssl rsa -pubin -in "$RUNNER_TEMP/wyvern.pem" -noout
+          export WYVERN_RELEASE_PUBLIC_KEY_FILE="$RUNNER_TEMP/wyvern.pem"
           node scripts/sign-release.mjs --export-public-key release-artifacts/updater.pem
           bash scripts/build-release.sh "${{ steps.release.outputs.version }}"
 

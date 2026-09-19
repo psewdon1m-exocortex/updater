@@ -32,7 +32,11 @@ func (s Server) componentUpdates(mux *http.ServeMux) {
 			return
 		}
 		kind := r.PathValue("component")
-		if kind != "updater" && kind != "neptune" && kind != "gryphon" {
+		if kind == "wyvern" && r.Context().Value(operatorDispatchKey{}) != true {
+			writeError(w, 403, errors.New("Shared Wyvern runtime updates require the root operator console"))
+			return
+		}
+		if kind != "updater" && kind != "neptune" && kind != "gryphon" && kind != "wyvern" {
 			writeError(w, 400, errors.New("unknown component"))
 			return
 		}
@@ -110,6 +114,8 @@ func (s Server) runComponentUpdate(job model.Job, kind string) {
 	var err error
 	if kind == "neptune" {
 		err = component.UpdateNeptune(s.Runtime, job.HeadID, job.Version)
+	} else if kind == "wyvern" {
+		err = component.UpdateWyvern(s.Runtime, job.HeadID, job.Version)
 	} else {
 		err = component.UpdateGryphon(s.Runtime, job.HeadID, job.Version)
 	}
@@ -131,6 +137,15 @@ func (s Server) runComponentUpdate(job model.Job, kind string) {
 	job.FinishedAt = &job.UpdatedAt
 	if err != nil {
 		job.State = "FAILED"
+		var outcome component.WyvernDeploymentError
+		if errors.As(err, &outcome) {
+			if outcome.RolledBack {
+				job.State = "ROLLED_BACK"
+			}
+			if outcome.RollbackFailed {
+				job.State = "ROLLBACK_FAILED"
+			}
+		}
 		job.Message = err.Error()
 	} else {
 		job.State = "COMPLETED"
