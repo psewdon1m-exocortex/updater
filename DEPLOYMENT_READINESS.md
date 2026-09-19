@@ -27,3 +27,17 @@ The seven-area policy in .github/pre-push-gate.json is required after native CI 
 Qualify the connected system with real HTTP Kernel→Volt authentication, clean archives/restores, PostgreSQL and pinned SFTP, independent Volt mirror, Windows folder synchronization, network interruption/replay, signed artifact rejection, private-edge negative cases and helper installation/reuse. Record PASS, FAIL and NOT_RUN separately. Production credentials, signed publication and actual deployment remain operator provisioning operations.
 
 See [README](README.md) for service commands.
+
+## Terminal operator entry point
+
+`sudo updater tui` uses the matching daemon's private operator socket at
+`/run/exocortex-admin/updater.sock`. The systemd unit must provide the separate
+runtime directory. The listener requires root peer credentials and mode `0600`;
+service-mounted sockets do not expose its routes. The terminal shows bounded
+status and job metadata, masks credential input and reuses the signed helper
+update/install paths. Closing SSH does not cancel an accepted operation.
+
+The built-in Help view and [terminal console contract](docs/TUI.md) document
+navigation, configuration prerequisites, reconnect and recovery. CI exercises
+the UI through a real PTY and tests root/non-root socket access. Real Termius
+desktop/mobile and live service enrollment remain separate acceptance checks.

@@ -176,6 +176,24 @@ for Kernel and Volt.
 
 ## CLI
 
+The built-in terminal console manages this host's Updater, Neptune and Gryphon:
+
+```sh
+sudo updater tui
+updater tui --demo
+updater tui --no-color --demo
+```
+
+Use arrows, Enter and Esc; Tab moves between form fields. The demo uses
+synthetic data and needs neither root nor installed services. In normal mode,
+the console connects to the separate root-only operator socket. Install the
+matching Updater binary and systemd unit before using it. Accepted jobs continue
+after the SSH session closes; reopen operation history to observe their result.
+Neptune schedules remain in Saturn. Wyvern is shown as a future integration.
+See [Terminal console](docs/TUI.md) for actions, trust boundaries, terminal
+compatibility and verification. An ordinary SSH PTY is required; Termius itself
+does not need an Exocortex plugin.
+
 ```text
 updater serve
 updater register-head <id> <env-file>

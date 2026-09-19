@@ -23,21 +23,29 @@
       ]
     },
     "internal_documentation": {
-      "applicable": false,
-      "reason": "This helper has no independent web Documentation view; connected head interfaces provide operator workflows, and the repository ships technical instructions."
+      "applicable": true,
+      "evidence": [
+        "internal/tui/view.go",
+        "internal/tui/model_test.go",
+        "docs/TUI.md"
+      ]
     },
     "technical_documentation": {
       "applicable": true,
       "evidence": [
         "README.md",
-        "DEPLOYMENT_READINESS.md"
+        "DEPLOYMENT_READINESS.md",
+        "docs/TUI.md"
       ]
     },
     "security": {
       "applicable": true,
       "evidence": [
         "internal/state/operation_test.go",
-        "internal/api/access_test.go"
+        "internal/api/access_test.go",
+        "internal/api/operator_test.go",
+        "internal/api/operator_socket_linux_test.go",
+        "internal/console/client_test.go"
       ]
     },
     "public_seo_geo": {
@@ -49,7 +57,9 @@
       "evidence": [
         "DEPLOYMENT_READINESS.md",
         "internal/state/operation_test.go",
-        "internal/api/access_test.go"
+        "internal/api/access_test.go",
+        "internal/api/operator_socket_linux_test.go",
+        "docs/TUI.md"
       ]
     }
   }

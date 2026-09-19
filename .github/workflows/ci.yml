@@ -40,6 +40,12 @@ jobs:
         env:
           CGO_ENABLED: "0"
         run: go build -o /tmp/updater ./cmd/updater
+      - name: Exercise terminal console in a real PTY
+        run: python3 scripts/test-tui-pty.py /tmp/updater
+      - name: Verify root-only operator socket isolation
+        run: |
+          go test -c -o /tmp/updater-api-tests ./internal/api
+          sudo /tmp/updater-api-tests -test.run '^TestOperator(Socket|Unit)'
 
   pre-push-gate:
     name: Pre-push gate

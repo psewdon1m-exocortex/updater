@@ -20,6 +20,7 @@ import (
 	"updater/internal/selfupdate"
 	"updater/internal/socketmount"
 	"updater/internal/state"
+	"updater/internal/tui"
 )
 
 var version = "0.5.0"
@@ -32,6 +33,8 @@ func main() {
 	runtime := config.RuntimeFromEnv()
 	runtime.UpdaterVersion = version
 	switch os.Args[1] {
+	case "tui":
+		exitIf(tui.Run(os.Args[2:], runtime.OperatorSocketPath))
 	case "serve":
 		if hostrecovery.PendingHostRecovery() {
 			if exec.Command("systemctl", "is-active", "--quiet", "exocortex-host-recovery.service").Run() == nil {
@@ -177,6 +180,7 @@ func help() {
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  updater serve")
+	fmt.Println("  updater tui [--demo] [--no-color]")
 	fmt.Println("  updater register-head <id> <env-file>")
 	fmt.Println("  updater migrate-head --head <id> --version <version> --saved-backup-stdin --confirm-saved")
 	fmt.Println("  updater status")

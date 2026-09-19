@@ -2,6 +2,11 @@
 
 ## 0.5.0 — unreleased
 
+- Add `updater tui`, an arrow-key operator console for local Updater, Neptune
+  and Gryphon management, with a root-only administrative socket, masked
+  credential forms, durable job observation and a service-free demo mode.
+- Add PTY and operator socket isolation checks; keep the existing machine API
+  service-scoped and leave Neptune scheduling in Saturn.
 - Standardize update discovery and durable jobs for heads and shared helpers.
 - Require one saved standard ZIP and a signed receipt before a head update;
   keep rollback bytes in RAM/tmpfs and persist only recovery metadata.

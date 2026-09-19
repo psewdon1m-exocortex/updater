@@ -360,6 +360,14 @@ func (s Server) ListenAndServe() error {
 	if err := os.Chmod(s.Runtime.SocketPath, 0o660); err != nil {
 		return err
 	}
+	var operator net.Listener
+	if s.Runtime.OperatorSocketPath != "" {
+		operator, err = listenOperator(s.Runtime.OperatorSocketPath, s.Runtime.SocketPath)
+		if err != nil {
+			return err
+		}
+		defer operator.Close()
+	}
 	if s.OnReady != nil {
 		s.OnReady()
 	}
@@ -369,7 +377,16 @@ func (s Server) ListenAndServe() error {
 		IdleTimeout:       30 * time.Second,
 		MaxHeaderBytes:    32 * 1024,
 	}
-	return server.Serve(listener)
+	if operator == nil {
+		return server.Serve(listener)
+	}
+	admin := &http.Server{Handler: s.operatorHandler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
+	defer admin.Close()
+	defer server.Close()
+	errors := make(chan error, 2)
+	go func() { errors <- admin.Serve(operator) }()
+	go func() { errors <- server.Serve(listener) }()
+	return <-errors
 }
 
 func withLocalHeaders(next http.Handler) http.Handler {

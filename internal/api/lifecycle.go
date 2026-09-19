@@ -15,15 +15,16 @@ import (
 )
 
 type lifecycleRequest struct {
-	HeadID   string `json:"head_id"`
-	Alias    string `json:"alias,omitempty"`
-	BotToken string `json:"bot_token,omitempty"`
+	HeadID    string `json:"head_id"`
+	RequestID string `json:"request_id,omitempty"`
+	Alias     string `json:"alias,omitempty"`
+	BotToken  string `json:"bot_token,omitempty"`
 }
 
 var lifecycleStart sync.Mutex
 
 func (s Server) lifecycle(mux *http.ServeMux) {
-	for _, kind := range []string{"gryphon-initialization", "gryphon-bot", "updater-self-update"} {
+	for _, kind := range []string{"gryphon-initialization", "gryphon-bot", "neptune-installation", "updater-self-update"} {
 		mux.HandleFunc("POST /v1/lifecycle/"+kind, func(w http.ResponseWriter, r *http.Request) {
 			lifecycleStart.Lock()
 			defer lifecycleStart.Unlock()
@@ -44,13 +45,32 @@ func (s Server) lifecycle(mux *http.ServeMux) {
 				writeError(w, 400, err)
 				return
 			}
-			if kind != "updater-self-update" && !component.ConsumesHelper(head.Service, "gryphon") {
-				writeError(w, 403, errors.New("head does not consume Gryphon"))
+			helper := "gryphon"
+			if kind == "neptune-installation" {
+				helper = "neptune"
+			}
+			if kind != "updater-self-update" && !component.ConsumesHelper(head.Service, helper) {
+				writeError(w, 403, errors.New("head does not consume the requested helper"))
 				return
 			}
 			if kind != "gryphon-bot" && (input.Alias != "" || input.BotToken != "") {
 				writeError(w, 400, errors.New("unexpected bot credentials"))
 				return
+			}
+			if input.RequestID != "" {
+				if !operatorRequestID.MatchString(input.RequestID) {
+					writeError(w, 400, errors.New("invalid request id"))
+					return
+				}
+				if previous, ok := s.Store.ByRequestID(input.RequestID); ok {
+					if previous.HeadID != input.HeadID || previous.Service != kind {
+						writeError(w, 409, errors.New("request id is already in use"))
+						return
+					}
+					latest, _ := s.Store.Get(previous.ID)
+					writeJSON(w, 200, latest)
+					return
+				}
 			}
 			for _, listed := range s.Store.List() {
 				job, _ := s.Store.Get(listed.ID)
@@ -76,7 +96,7 @@ func (s Server) lifecycle(mux *http.ServeMux) {
 				return
 			}
 			now := time.Now().UTC()
-			job := model.Job{ID: "component-" + hex.EncodeToString(bytes), HeadID: input.HeadID, Service: kind, State: "REQUESTED", CreatedAt: now, UpdatedAt: now}
+			job := model.Job{ID: "component-" + hex.EncodeToString(bytes), RequestID: input.RequestID, HeadID: input.HeadID, Service: kind, State: "REQUESTED", CreatedAt: now, UpdatedAt: now}
 			if err := s.Store.Save(job); err != nil {
 				writeError(w, 500, err)
 				return
@@ -102,6 +122,8 @@ func (s Server) lifecycle(mux *http.ServeMux) {
 					var err error
 					if kind == "gryphon-initialization" {
 						job.Version, err = component.InitializeGryphon(s.Runtime, input.HeadID)
+					} else if kind == "neptune-installation" {
+						job.Version, err = component.InstallLatestNeptune(s.Runtime, input.HeadID)
 					} else {
 						err = component.ConnectGryphonBot(s.Runtime, input.HeadID, input.Alias, input.BotToken)
 						input.BotToken = ""
