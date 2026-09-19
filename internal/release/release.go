@@ -27,9 +27,10 @@ var semver = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9
 const maxComposeBundleBytes int64 = 128 * 1024 * 1024
 
 type githubRelease struct {
-	TagName string `json:"tag_name"`
-	Draft   bool   `json:"draft"`
-	Assets  []struct {
+	TagName    string `json:"tag_name"`
+	Draft      bool   `json:"draft"`
+	Prerelease bool   `json:"prerelease"`
+	Assets     []struct {
 		Name               string `json:"name"`
 		BrowserDownloadURL string `json:"browser_download_url"`
 	} `json:"assets"`
@@ -71,7 +72,7 @@ func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stag
 	candidates := make([]githubRelease, 0)
 	for _, item := range releases {
 		version, matchesService := versionFromServiceTag(service, item.TagName)
-		if item.Draft || !matchesService {
+		if item.Draft || item.Prerelease || !matchesService || !Stable(version) {
 			continue
 		}
 		if requestedVersion != "" && version != requestedVersion {
@@ -131,6 +132,9 @@ func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stag
 	}
 	if manifest.DatabaseSchema < 1 {
 		return Resolved{}, errors.New("release manifest database_schema is invalid")
+	}
+	if manifest.RollbackRestore != "" && !((service == "laboratory" && manifest.RollbackRestore == "laboratory-offline-v1") || (service == "saturn" && manifest.RollbackRestore == "saturn-offline-v1")) {
+		return Resolved{}, errors.New("release manifest rollback_restore is unsupported")
 	}
 	if service == "saturn" && !regexp.MustCompile(`^[a-zA-Z0-9._:/-]+@sha256:[a-f0-9]{64}$`).MatchString(manifest.WebImage) {
 		return Resolved{}, errors.New("Saturn web image must be pinned to a digest")

@@ -93,7 +93,7 @@ func runSupervised(runtime config.Runtime, id, kind string) (result error) {
 		return err
 	}
 	if kind == "updater-self-update" {
-		return selfupdate.Run(runtime, job.HeadID)
+		return selfupdate.RunVersion(runtime, job.HeadID, job.Version)
 	}
 	info, err := os.Stat(filepath.Join(directory, "archive"))
 	if err != nil {

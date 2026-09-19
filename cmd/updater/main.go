@@ -16,12 +16,13 @@ import (
 	"updater/internal/config"
 	"updater/internal/engine"
 	"updater/internal/hostrecovery"
+	"updater/internal/migration"
 	"updater/internal/selfupdate"
 	"updater/internal/socketmount"
 	"updater/internal/state"
 )
 
-var version = "0.4.9"
+var version = "0.5.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -40,14 +41,24 @@ func main() {
 		}
 		store, err := state.New(runtime.StateDir)
 		exitIf(err)
-		exitIf(store.ReconcileInterrupted(activeSupervisor))
-		exitIf(store.CleanupRecoveryStaging())
 		repairer := socketmount.New(runtime)
 		server := api.Server{
 			Version: version,
 			Runtime: runtime,
 			Store:   store,
 			Engine:  engine.New(runtime, store, nil),
+			Prepare: func() error {
+				if err := store.ReconcileInterrupted(activeSupervisor); err != nil {
+					return err
+				}
+				if err := engine.MigrateBackupRetention(runtime, store); err != nil {
+					return err
+				}
+				if err := engine.CleanupVolatileRecovery(); err != nil {
+					return err
+				}
+				return store.CleanupRecoveryStaging()
+			},
 			OnReady: func() {
 				go func() {
 					// Reconcile after the socket is available and allow manual jobs
@@ -79,6 +90,10 @@ func main() {
 		}
 		fmt.Printf("updater %s listening on %s\n", version, runtime.SocketPath)
 		exitIf(server.ListenAndServe())
+	case "migrate-head":
+		job, err := migration.Run(runtime, os.Args[2:], os.Stdin)
+		exitIf(err)
+		printJSON(job)
 	case "register-head":
 		if len(os.Args) != 4 {
 			fatal("usage: updater register-head <id> <env-file>")
@@ -163,6 +178,7 @@ func help() {
 	fmt.Println("Usage:")
 	fmt.Println("  updater serve")
 	fmt.Println("  updater register-head <id> <env-file>")
+	fmt.Println("  updater migrate-head --head <id> --version <version> --saved-backup-stdin --confirm-saved")
 	fmt.Println("  updater status")
 	fmt.Println("  updater jobs")
 	fmt.Println("  updater update [--head <id>]")

@@ -15,9 +15,12 @@ import (
 )
 
 type deploymentFile struct {
-	Name    string `json:"name"`
-	Existed bool   `json:"existed"`
-	Data    []byte `json:"data,omitempty"`
+	Name                string   `json:"name"`
+	Existed             bool     `json:"existed"`
+	Data                []byte   `json:"data,omitempty"`
+	EnvironmentMetadata bool     `json:"environment_metadata,omitempty"`
+	AddedKeys           []string `json:"added_keys,omitempty"`
+	TrailingNewlines    string   `json:"trailing_newlines,omitempty"`
 }
 
 // Only versioned deployment files are applied. Environment, trust, state and
@@ -205,7 +208,24 @@ func snapshotDeployment(head config.HeadConfig, files map[string][]byte, snapsho
 		if err != nil {
 			return err
 		}
-		previous = append(previous, deploymentFile{Name: name, Existed: true, Data: data})
+		if name == ".env" {
+			keys := map[string]bool{}
+			for _, line := range strings.Split(string(data), "\n") {
+				if key, _, ok := strings.Cut(line, "="); ok {
+					keys[strings.TrimSpace(key)] = true
+				}
+			}
+			added := []string{}
+			for _, line := range strings.Split(string(files[name]), "\n") {
+				if key, _, ok := strings.Cut(line, "="); ok && !keys[strings.TrimSpace(key)] {
+					added = append(added, strings.TrimSpace(key))
+				}
+			}
+			tail := string(data[len(strings.TrimRight(string(data), "\r\n")):])
+			previous = append(previous, deploymentFile{Name: name, Existed: true, EnvironmentMetadata: true, AddedKeys: added, TrailingNewlines: tail})
+		} else {
+			previous = append(previous, deploymentFile{Name: name, Existed: true, Data: data})
+		}
 	}
 	body, err := json.Marshal(previous)
 	if err != nil {
@@ -277,7 +297,24 @@ func restoreDeployment(head config.HeadConfig, snapshot string) error {
 			return errors.New("duplicate deployment snapshot member")
 		}
 		seen[file.Name] = true
-		if file.Existed {
+		if file.Name == ".env" && file.EnvironmentMetadata {
+			current, readErr := os.ReadFile(target)
+			if readErr != nil {
+				return readErr
+			}
+			added := map[string]bool{}
+			for _, key := range file.AddedKeys {
+				added[key] = true
+			}
+			lines := []string{}
+			for _, line := range strings.Split(string(current), "\n") {
+				key, _, _ := strings.Cut(line, "=")
+				if !added[strings.TrimSpace(key)] {
+					lines = append(lines, line)
+				}
+			}
+			err = atomicDeploymentWrite(target, []byte(strings.TrimRight(strings.Join(lines, "\n"), "\r\n")+file.TrailingNewlines))
+		} else if file.Existed {
 			err = atomicDeploymentWrite(target, file.Data)
 		} else {
 			err = os.Remove(target)
@@ -293,8 +330,8 @@ func restoreDeployment(head config.HeadConfig, snapshot string) error {
 }
 
 // The signed template supplies missing safe defaults. Existing operator values,
-// credentials and comments remain byte-for-byte, and the full prior env is part
-// of the protected deployment rollback snapshot. No template is executed.
+// credentials and comments remain byte-for-byte. Rollback records only names
+// of newly added defaults, never a second copy of environment secrets.
 func prepareHeadEnvironment(head config.HeadConfig, files map[string][]byte) error {
 	template, present := files[".env.example"]
 	if !present {

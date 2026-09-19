@@ -79,8 +79,8 @@ image and installed-version keys. Updater changes them in one atomic `.env`
 rewrite and restores both values during rollback, so release discovery never
 reports a successfully installed release as still pending.
 
-`repositories.updater.url` is used only by the manual `updater update`
-self-update command.
+`repositories.updater.url` is used by UI discovery, exact-version self-update
+and the equivalent `updater update` command.
 
 ## Installation
 
@@ -142,7 +142,7 @@ server-managed Nginx.
   public key beside a helper artifact is never accepted as its trust source;
 - the compose archive must match the SHA-256 stored in the selected manifest;
 - the selected image is pulled by immutable digest;
-- the operator download and server-side backup are created before mutation;
+- one signed-receipt ZIP is saved by the operator before mutation; no server archive is retained;
 - existing persistent Docker volumes are preserved;
 - local and optional public health checks gate success;
 - a failed health check restores the previous image and imports the backup;
@@ -162,8 +162,9 @@ server-managed Nginx.
   executable/unit replacement, health check, and rollback remain inside
   Updater.
 
-The worker retains at most 20 finished jobs/backups and removes finished data
-older than 30 days. The systemd journal is rate-limited to 200 messages per
+The worker retains at most 20 finished job metadata records, bounded by 30 days.
+ZIP bytes are cleared from RAM when an operation terminates. Later recovery
+requires uploading the original operator-held ZIP. The systemd journal is rate-limited to 200 messages per
 30 seconds. Unit-level safety defaults remain declared in `updater.service`;
 `/etc/exocortex/updater/.env` is the only Updater environment file and head
 settings remain in each head's own `.env`.
@@ -202,3 +203,10 @@ atomically replaces the binary, restarts the systemd unit, verifies the Unix
 socket health endpoint and restores the previous binary if verification fails.
 
 The current six-service deployment, trust, recovery and acceptance contract is documented in [Deployment readiness](DEPLOYMENT_READINESS.md).
+
+## Unified updates (protocol 2)
+
+See [Update protocol, saved ZIP and first migration](docs/UPDATE-PROTOCOL.md).
+The UI uses Updater **0.5.0**, an exact selected version, the standard ZIP saved
+on the operator PC, and durable status/progress. Helper updates use the same
+dialog without a backup. No update ZIP is retained on the application host.

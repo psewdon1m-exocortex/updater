@@ -26,10 +26,13 @@ type Server struct {
 	Store   *state.Store
 	Engine  *engine.Engine
 	OnReady func()
+	Prepare func() error
 }
 
 func (s Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	s.protocol(mux)
+	s.componentUpdates(mux)
 	s.lifecycle(mux)
 	s.recovery(mux)
 	mux.HandleFunc("POST /v1/releases/check", func(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +59,7 @@ func (s Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status": "ok", "service": "updater", "version": s.Version, "busy": s.Engine.Busy() || s.Store.HasActiveOperation(),
+			"status": "ok", "service": "updater", "version": s.Version, "busy": s.Engine.Busy() || s.Store.HasActiveOperation(), "update_protocol": 2, "backup_policy": "operator-copy",
 		})
 	})
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, _ *http.Request) {
@@ -107,30 +110,6 @@ func (s Server) Handler() http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, job)
-	})
-	mux.HandleFunc("POST /v1/updates", func(w http.ResponseWriter, request *http.Request) {
-		request.Body = http.MaxBytesReader(w, request.Body, 180*1024*1024)
-		var payload model.UpdateRequest
-		decoder := json.NewDecoder(request.Body)
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&payload); err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid update request: %w", err))
-			return
-		}
-		if err := s.authorize(request, payload.HeadID); err != nil {
-			writeError(w, http.StatusUnauthorized, err)
-			return
-		}
-		job, err := s.Engine.Start(payload)
-		if err != nil {
-			status := http.StatusBadRequest
-			if strings.Contains(err.Error(), "already running") {
-				status = http.StatusConflict
-			}
-			writeError(w, status, err)
-			return
-		}
-		writeJSON(w, http.StatusAccepted, job)
 	})
 	mux.HandleFunc("POST /v1/components/neptune-linux/update", func(w http.ResponseWriter, request *http.Request) {
 		request.Body = http.MaxBytesReader(w, request.Body, 64*1024)
@@ -371,6 +350,13 @@ func (s Server) ListenAndServe() error {
 		return err
 	}
 	defer listener.Close()
+	// Reconcile/migrate only after claiming the socket. A rejected second daemon
+	// must not mark the first daemon's active jobs interrupted or remove its data.
+	if s.Prepare != nil {
+		if err := s.Prepare(); err != nil {
+			return err
+		}
+	}
 	if err := os.Chmod(s.Runtime.SocketPath, 0o660); err != nil {
 		return err
 	}

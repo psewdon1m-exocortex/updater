@@ -107,7 +107,7 @@ func backup() model.Backup {
 	}
 }
 
-func TestDryRunPersistsBackupAndCompletes(t *testing.T) {
+func TestDryRunDoesNotPersistBackupAndCompletes(t *testing.T) {
 	instance, _, store := testEngine(t, true)
 	job, err := instance.Start(model.UpdateRequest{
 		RequestID: "request-1", HeadID: "kernel", Service: "kernel", Backup: backup(),
@@ -119,8 +119,8 @@ func TestDryRunPersistsBackupAndCompletes(t *testing.T) {
 	for time.Now().Before(deadline) {
 		current, _ := store.Get(job.ID)
 		if current.State == "COMPLETED" {
-			if _, err := os.Stat(current.BackupPath); err != nil {
-				t.Fatal(err)
+			if current.BackupPath != "" || current.RecoveryMode != "operator-copy" {
+				t.Fatal("backup must stay volatile")
 			}
 			return
 		}

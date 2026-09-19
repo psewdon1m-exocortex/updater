@@ -160,7 +160,7 @@ UPDATER_CONTROL_TOKEN=head-secret
 	request.Header.Set("X-Updater-Token", "head-secret")
 	response = httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusAccepted {
+	if response.Code != http.StatusUpgradeRequired {
 		t.Fatalf("unexpected authenticated status: %d (%s)", response.Code, response.Body.String())
 	}
 	deadline := time.Now().Add(time.Second)
@@ -232,6 +232,7 @@ func TestSecondUpdaterCannotReplaceAnActiveUnixSocket(t *testing.T) {
 	server := Server{
 		Runtime: config.Runtime{SocketPath: socketPath},
 	}
+	server.Prepare = func() error { t.Fatal("second daemon must not migrate active state"); return nil }
 	err = server.ListenAndServe()
 	if err == nil || !strings.Contains(err.Error(), "already listening") {
 		t.Fatalf("expected active-socket collision, got %v", err)

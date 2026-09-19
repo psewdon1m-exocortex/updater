@@ -19,11 +19,13 @@ type Backup struct {
 }
 
 type UpdateRequest struct {
-	RequestID string `json:"request_id"`
-	HeadID    string `json:"head_id"`
-	Service   string `json:"service"`
-	Version   string `json:"version,omitempty"`
-	Backup    Backup `json:"backup"`
+	RequestID     string `json:"request_id"`
+	HeadID        string `json:"head_id"`
+	Service       string `json:"service"`
+	Version       string `json:"version,omitempty"`
+	Backup        Backup `json:"backup"`
+	BackupReceipt string `json:"backup_receipt,omitempty"`
+	OperatorSaved bool   `json:"operator_saved,omitempty"`
 }
 
 type NeptuneInitializationRequest struct {
@@ -43,6 +45,10 @@ type Job struct {
 	State              string     `json:"state"`
 	Message            string     `json:"message,omitempty"`
 	BackupPath         string     `json:"backup_path,omitempty"`
+	RecoveryMode       string     `json:"recovery_mode,omitempty"`
+	BackupSHA256       string     `json:"backup_sha256,omitempty"`
+	BackupFilename     string     `json:"backup_filename,omitempty"`
+	Progress           Progress   `json:"progress"`
 	PreviousImage      string     `json:"previous_image,omitempty"`
 	PreviousWebImage   string     `json:"previous_web_image,omitempty"`
 	DeploymentSnapshot string     `json:"deployment_snapshot,omitempty"`
@@ -50,6 +56,7 @@ type Job struct {
 	PreviousVersion    string     `json:"previous_version,omitempty"`
 	InstalledImage     string     `json:"installed_image,omitempty"`
 	InstalledVersion   string     `json:"installed_version,omitempty"`
+	RecoveryImage      string     `json:"recovery_image,omitempty"`
 	RollbackAvailable  bool       `json:"rollback_available"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
@@ -71,4 +78,5 @@ type ReleaseManifest struct {
 	DatabaseSchema        int    `json:"database_schema"`
 	MinimumUpdaterVersion string `json:"minimum_updater_version"`
 	WebImage              string `json:"web_image,omitempty"`
+	RollbackRestore       string `json:"rollback_restore,omitempty"`
 }

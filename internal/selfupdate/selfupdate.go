@@ -40,9 +40,10 @@ type manifest struct {
 }
 
 type githubRelease struct {
-	TagName string `json:"tag_name"`
-	Draft   bool   `json:"draft"`
-	Assets  []struct {
+	TagName    string `json:"tag_name"`
+	Draft      bool   `json:"draft"`
+	Prerelease bool   `json:"prerelease"`
+	Assets     []struct {
 		Name               string `json:"name"`
 		BrowserDownloadURL string `json:"browser_download_url"`
 	} `json:"assets"`
@@ -50,7 +51,9 @@ type githubRelease struct {
 
 var versionPattern = regexp.MustCompile(`^updater-v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$`)
 
-func Run(runtime config.Runtime, headID string) error {
+func Run(runtime config.Runtime, headID string) error { return RunVersion(runtime, headID, "") }
+
+func RunVersion(runtime config.Runtime, headID, requestedVersion string) error {
 	if headID == "" {
 		registry, err := config.LoadRegistry(runtime.RegistryPath)
 		if err != nil {
@@ -78,10 +81,14 @@ func Run(runtime config.Runtime, headID string) error {
 	if err != nil {
 		return err
 	}
-	return apply(runtime, repositoryURL, head)
+	return applyVersion(runtime, repositoryURL, head, requestedVersion)
 }
 
 func apply(runtime config.Runtime, repositoryURL string, head config.HeadConfig) error {
+	return applyVersion(runtime, repositoryURL, head, "")
+}
+
+func applyVersion(runtime config.Runtime, repositoryURL string, head config.HeadConfig, requestedVersion string) error {
 	parsed, err := url.Parse(repositoryURL)
 	if err != nil || parsed.Scheme != "https" || strings.ToLower(parsed.Hostname()) != "github.com" {
 		return errors.New("repositories.updater.url must identify an HTTPS GitHub repository")
@@ -109,13 +116,7 @@ func apply(runtime config.Runtime, repositoryURL string, head config.HeadConfig)
 	if err := json.NewDecoder(io.LimitReader(response.Body, 4*1024*1024)).Decode(&releases); err != nil {
 		return err
 	}
-	var selected *githubRelease
-	for index := range releases {
-		if !releases[index].Draft && versionPattern.MatchString(releases[index].TagName) {
-			selected = &releases[index]
-			break
-		}
-	}
+	selected := selectRelease(releases, requestedVersion)
 	if selected == nil {
 		return errors.New("no updater-v* release is available")
 	}
@@ -290,4 +291,19 @@ func copyFile(source, target string, mode os.FileMode) error {
 		return err
 	}
 	return os.WriteFile(target, body, mode)
+}
+
+func selectRelease(releases []githubRelease, requestedVersion string) *githubRelease {
+	var selected *githubRelease
+	for index := range releases {
+		item := &releases[index]
+		version := strings.TrimPrefix(item.TagName, "updater-v")
+		if item.Draft || item.Prerelease || !strings.HasPrefix(item.TagName, "updater-v") || !release.Stable(version) || (requestedVersion != "" && version != requestedVersion) {
+			continue
+		}
+		if selected == nil || release.Upgrade(version, strings.TrimPrefix(selected.TagName, "updater-v")) {
+			selected = item
+		}
+	}
+	return selected
 }

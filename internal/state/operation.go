@@ -44,6 +44,9 @@ func (s *Store) ReconcileInterrupted(supervisorActive func(model.Job) bool) erro
 		}
 		now := time.Now().UTC()
 		job.State, job.Message = "FAILED", "Host operation was interrupted; inspect status and retry or use the retained rollback snapshot"
+		if job.RecoveryMode == "operator-copy" {
+			job.Message = "Host operation was interrupted; upload the saved pre-update ZIP to recover. The server keeps no backup archive."
+		}
 		job.UpdatedAt, job.FinishedAt = now, &now
 		if err := s.Save(job); err != nil {
 			return err

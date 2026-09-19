@@ -46,11 +46,13 @@ type Engine struct {
 	loadRegister     func(string, string, string, time.Duration) (kernel.Snapshot, error)
 	resolveRelease   func(context.Context, string, string, string, string) (release.Resolved, error)
 	checkHealthFn    func(context.Context, string) error
+	checkVersionFn   func(context.Context, string, string) error
 	restoreBackupFn  func(context.Context, config.HeadConfig, string) error
 	chownBackupFn    func(string, int, int) error
 	mu               sync.Mutex
 	busy             bool
 	operationRelease func()
+	volatile         map[string][]byte
 }
 
 func New(runtime config.Runtime, store *state.Store, runner Runner) *Engine {
@@ -64,8 +66,10 @@ func New(runtime config.Runtime, store *state.Store, runner Runner) *Engine {
 		loadRegister:    kernel.Load,
 		resolveRelease:  release.Resolve,
 		checkHealthFn:   checkHealth,
+		checkVersionFn:  checkRunningVersion,
 		restoreBackupFn: restoreBackup,
 		chownBackupFn:   os.Chown,
+		volatile:        make(map[string][]byte),
 	}
 }
 
@@ -81,6 +85,7 @@ func (e *Engine) SetTestHostOperations(
 ) {
 	if check != nil {
 		e.checkHealthFn = check
+		e.checkVersionFn = func(context.Context, string, string) error { return nil }
 	}
 	if restore != nil {
 		e.restoreBackupFn = restore
@@ -104,7 +109,7 @@ func (e *Engine) Start(request model.UpdateRequest) (model.Job, error) {
 		return model.Job{}, errors.New("request_id, head_id and service are required")
 	}
 	if previous, ok := e.store.ByRequestID(request.RequestID); ok {
-		if previous.HeadID != request.HeadID || previous.Service != request.Service {
+		if previous.HeadID != request.HeadID || previous.Service != request.Service || previous.Version != request.Version || previous.BackupSHA256 != request.Backup.SHA256 {
 			return model.Job{}, errors.New("request id is already in use")
 		}
 		return previous, nil
@@ -120,6 +125,7 @@ func (e *Engine) Start(request model.UpdateRequest) (model.Job, error) {
 	if err != nil {
 		return model.Job{}, err
 	}
+	defer clear(backupBytes)
 	releaseOperation, err := e.store.BeginOperation("")
 	if err != nil {
 		return model.Job{}, err
@@ -148,18 +154,14 @@ func (e *Engine) Start(request model.UpdateRequest) (model.Job, error) {
 	if len(job.ID) > 48 {
 		job.ID = job.ID[:48]
 	}
-	backupPath, err := e.store.BackupPath(job.ID, request.Backup.Filename)
-	if err != nil {
-		e.releaseLock()
-		return model.Job{}, err
-	}
-	if err := os.WriteFile(backupPath, backupBytes, 0o600); err != nil {
-		e.releaseLock()
-		return model.Job{}, err
-	}
-	job.BackupPath = backupPath
-	job.RollbackAvailable = true
+	job.BackupSHA256, job.BackupFilename = request.Backup.SHA256, request.Backup.Filename
+	job.RecoveryMode = "operator-copy"
+	e.mu.Lock()
+	e.volatile[job.ID] = append([]byte(nil), backupBytes...)
+	e.mu.Unlock()
+	job.RollbackAvailable = false
 	if err := e.store.Save(job); err != nil {
+		e.clearVolatile(job.ID)
 		e.releaseLock()
 		return model.Job{}, err
 	}
@@ -185,6 +187,7 @@ func decodeBackup(backup model.Backup) ([]byte, error) {
 
 func (e *Engine) run(job model.Job, head config.HeadConfig) {
 	defer e.releaseLock()
+	defer e.clearVolatile(job.ID)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.runtime.CommandTimeoutSec)*time.Second)
 	defer cancel()
 	update := func(stateName, message string) {
@@ -211,7 +214,7 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 		_ = e.store.Save(job)
 		e.prune()
 	}
-	update("BACKUP_VERIFIED", "backup stored on the target VPS")
+	update("BACKUP_VERIFIED", "saved backup checksum verified")
 	snapshot, err := e.loadRegister(head.KernelURL, head.KernelServiceToken, head.KernelCachePath, 5*time.Second)
 	if err != nil {
 		fail(err)
@@ -235,6 +238,10 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 			resolved.Manifest.MinimumUpdaterVersion,
 			e.runtime.UpdaterVersion,
 		))
+		return
+	}
+	if !release.Upgrade(resolved.Manifest.Version, head.CurrentVersion) {
+		fail(errors.New("installation requires a newer stable release; use rollback for recovery"))
 		return
 	}
 	job.Version = resolved.Manifest.Version
@@ -265,6 +272,13 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 		_ = e.store.Save(job)
 	}
 	nextImage := resolved.Manifest.Image.Reference + "@" + resolved.Manifest.Image.Digest
+	if (job.Service == "laboratory" && resolved.Manifest.RollbackRestore == "laboratory-offline-v1") || (job.Service == "saturn" && resolved.Manifest.RollbackRestore == "saturn-offline-v1") {
+		job.RecoveryImage = nextImage
+		if err := e.store.Save(job); err != nil {
+			fail(err)
+			return
+		}
+	}
 	if job.Service == "saturn" {
 		values, err := config.ParseEnvFile(head.EnvFile)
 		if err != nil {
@@ -294,11 +308,16 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 	if job.Service == "saturn" {
 		values["VAULT_WEB_IMAGE"] = resolved.Manifest.WebImage
 	}
-	job.DeploymentSnapshot = filepath.Join(filepath.Dir(job.BackupPath), "deployment.json")
+	job.DeploymentSnapshot = filepath.Join(e.runtime.StateDir, "deployments", job.ID, "deployment.json")
+	if err := os.MkdirAll(filepath.Dir(job.DeploymentSnapshot), 0700); err != nil {
+		fail(err)
+		return
+	}
 	if err := snapshotDeployment(head, deployment, job.DeploymentSnapshot); err != nil {
 		fail(err)
 		return
 	}
+	job.RollbackAvailable = true
 	job.MutationStarted = true
 	if err := e.store.Save(job); err != nil {
 		fail(err)
@@ -328,6 +347,10 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 			return
 		}
 	}
+	if err := e.checkHeadVersion(ctx, head, resolved.Manifest.Version, nextImage); err != nil {
+		fail(err)
+		return
+	}
 	job.InstalledImage = nextImage
 	job.InstalledVersion = resolved.Manifest.Version
 	job.State, job.Message = "COMPLETED", "update completed"
@@ -356,6 +379,22 @@ func (e *Engine) composeUp(ctx context.Context, head config.HeadConfig) ([]byte,
 }
 
 func (e *Engine) rollback(ctx context.Context, job *model.Job, head config.HeadConfig) error {
+	if job.RecoveryMode == "operator-copy" {
+		filename, cleanup, err := e.recoveryFile(job.ID)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		copy := *job
+		copy.BackupPath = filename
+		job = &copy
+	}
+	offlineRestore := head.Service == "laboratory" && job.RecoveryImage != ""
+	if offlineRestore {
+		if err := e.restoreLaboratoryOffline(ctx, head, *job); err != nil {
+			return err
+		}
+	}
 	if err := restoreDeployment(head, job.DeploymentSnapshot); err != nil {
 		return err
 	}
@@ -385,8 +424,24 @@ func (e *Engine) rollback(ctx context.Context, job *model.Job, head config.HeadC
 			return err
 		}
 		// Restore before starting the older application against the database.
-		args := append(base, "run", "--rm", "--no-deps", "-v", job.BackupPath+":/recovery/rollback.zip:ro", "migrate", "node", "/app/scripts/recovery-cli.mjs", "restore-replace", "/recovery/rollback.zip", "--confirm-replace")
-		if _, err := e.runner.Run(ctx, "docker", args, nil, head.ProjectDir); err != nil {
+		// Older Saturn images also create a pre-restore ZIP. Keep all recovery
+		// scratch in container tmpfs so both generations leave no retained archive.
+		scratch, cleanup, err := recoveryDirectory()
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		if err = e.chownBackupFn(scratch, 1000, 1000); err != nil {
+			return err
+		}
+		restoreCommand := "restore-replace"
+		var restoreEnvironment []string
+		if job.RecoveryImage != "" {
+			restoreCommand = "restore-rollback"
+			restoreEnvironment = []string{head.ImageVariable + "=" + job.RecoveryImage}
+		}
+		args := append(base, "run", "--rm", "--no-deps", "--user", "1000:1000", "-e", "RECOVERY_ARCHIVE_DIR=/recovery-work/archives", "-e", "RECOVERY_SPOOL_DIR=/recovery-work/spool", "-v", scratch+":/recovery-work", "-v", job.BackupPath+":/recovery/rollback.zip:ro", "api", "node", "/app/scripts/recovery-cli.mjs", restoreCommand, "/recovery/rollback.zip", "--confirm-replace")
+		if _, err := e.runner.Run(ctx, "docker", args, restoreEnvironment, head.ProjectDir); err != nil {
 			return errors.New("Saturn snapshot rollback failed")
 		}
 	}
@@ -396,10 +451,28 @@ func (e *Engine) rollback(ctx context.Context, job *model.Job, head config.HeadC
 	if err := e.checkHealthFn(ctx, head.LocalHealthURL); err != nil {
 		return err
 	}
-	if head.RestoreURL != "" && head.Service != "saturn" {
+	if err := e.checkHeadVersion(ctx, head, job.PreviousVersion, job.PreviousImage); err != nil {
+		return err
+	}
+	if head.RestoreURL != "" && head.Service != "saturn" && !offlineRestore {
 		if err := e.restoreBackupFn(ctx, head, job.BackupPath); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (e *Engine) restoreLaboratoryOffline(ctx context.Context, head config.HeadConfig, job model.Job) error {
+	if err := e.chownBackupFn(job.BackupPath, 1000, 1000); err != nil {
+		return err
+	}
+	base := []string{"compose", "--env-file", head.EnvFile, "-f", filepath.Join(head.ProjectDir, head.ComposeFile)}
+	if _, err := e.runner.Run(ctx, "docker", append(append([]string{}, base...), "stop", head.ComposeService), nil, head.ProjectDir); err != nil {
+		return errors.New("cannot stop Laboratory before offline restore")
+	}
+	args := append(base, "run", "--rm", "--no-deps", "-v", job.BackupPath+":/recovery/backup.zip:ro", "--entrypoint", "node", head.ComposeService, "/app/services/api/src/restore-cli.js", "/recovery/backup.zip", "--confirm-replace")
+	if output, err := e.runner.Run(ctx, "docker", args, []string{head.ImageVariable + "=" + job.RecoveryImage}, head.ProjectDir); err != nil {
+		return fmt.Errorf("Laboratory offline restore failed: %s", strings.TrimSpace(string(output)))
 	}
 	return nil
 }
@@ -411,6 +484,9 @@ func (e *Engine) Rollback(jobID string) (model.Job, error) {
 	}
 	if job.PreviousImage == "" || !job.RollbackAvailable {
 		return model.Job{}, errors.New("rollback is unavailable for this job")
+	}
+	if job.RecoveryMode == "operator-copy" && !e.hasVolatile(job.ID) {
+		return model.Job{}, errors.New("upload the saved pre-update ZIP to restore this version")
 	}
 	head, err := config.LoadHead(e.runtime, job.HeadID)
 	if err != nil {
@@ -435,6 +511,7 @@ func (e *Engine) Rollback(jobID string) (model.Job, error) {
 	_ = e.store.Save(job)
 	go func() {
 		defer e.releaseLock()
+		defer e.clearVolatile(job.ID)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.runtime.CommandTimeoutSec)*time.Second)
 		defer cancel()
 		if err := e.rollback(ctx, &job, head); err != nil {

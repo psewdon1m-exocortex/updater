@@ -204,7 +204,7 @@ func UpdateGryphon(runtimeConfig config.Runtime, headID, version string) error {
 	if !gryphonInstallationComplete() {
 		return installFreshGryphon(ctx, extracted, head)
 	}
-	return replaceGryphon(ctx, extracted)
+	return replaceGryphon(ctx, extracted, version)
 }
 
 func gryphonRepository(raw string) (string, string, error) {
@@ -361,7 +361,7 @@ func copyTree(source, target string) error {
 	})
 }
 
-func replaceGryphon(ctx context.Context, extracted string) error {
+func replaceGryphon(ctx context.Context, extracted string, expected ...string) error {
 	unitTarget, err := managedSystemdUnit(gryphonUnit, gryphonManagedUnit)
 	if err != nil {
 		return err
@@ -404,6 +404,9 @@ func replaceGryphon(ctx context.Context, extracted string) error {
 	activationErr := daemonReload(ctx)
 	if activationErr == nil {
 		activationErr = restartGryphon(ctx)
+		if activationErr == nil && len(expected) > 0 {
+			activationErr = verifyRunningComponent("gryphon", expected[0])
+		}
 	}
 	if activationErr == nil {
 		_ = os.Remove(unitPrevious)

@@ -82,6 +82,12 @@ func TestSaturnRollsBackBothImagesAndDatabaseBeforeReadiness(t *testing.T) {
 			calls := strings.Join(runner.calls, "\n")
 			runner.mu.Unlock()
 			restore := strings.Index(calls, "recovery-cli.mjs restore-replace")
+			if !strings.Contains(calls, "--user 1000:1000") || !strings.Contains(calls, "api node /app/scripts/recovery-cli.mjs") {
+				t.Fatal("recovery requires the application uid, secrets and storage runtime volume")
+			}
+			if !strings.Contains(calls, "RECOVERY_ARCHIVE_DIR=/recovery-work/archives") || !strings.Contains(calls, "RECOVERY_SPOOL_DIR=/recovery-work/spool") || !strings.Contains(calls, "/dev/shm/exocortex-recovery-") {
+				t.Fatal("rollback may retain archives on persistent storage")
+			}
 			finalStart := strings.LastIndex(calls, "up -d --no-deps api worker web")
 			if restore < 0 || restore > finalStart || !strings.Contains(calls, "stop api worker web") || strings.Contains(calls, " api worker edge") || !strings.Contains(calls, "pull ghcr.io/example/web@sha256:new") {
 				t.Fatal("paired replacement/restore order was not executed")

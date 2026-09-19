@@ -22,6 +22,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	releasesemver "updater/internal/release"
 	"updater/internal/releaseauth"
 
 	"updater/internal/config"
@@ -70,7 +71,7 @@ func latestQualifiedReleaseVersion(releases []githubRelease, prefix string) stri
 			continue
 		}
 		candidate := strings.TrimPrefix(release.TagName, prefix)
-		if neptuneVersion.MatchString(candidate) && (available == "" || compareVersion(candidate, available) > 0) {
+		if releasesemver.Stable(candidate) && (available == "" || compareVersion(candidate, available) > 0) {
 			available = candidate
 		}
 	}
@@ -194,6 +195,18 @@ func compareVersion(left, right string) int {
 }
 
 func UpdateNeptune(runtimeConfig config.Runtime, headID, version string) error {
+	if !releasesemver.Stable(version) {
+		return errors.New("a stable Neptune version is required")
+	}
+	if neptuneInstallationComplete() {
+		current, err := InstalledVersion("neptune")
+		if err != nil {
+			return err
+		}
+		if !releasesemver.Upgrade(version, current) {
+			return errors.New("Neptune update must target a newer version")
+		}
+	}
 	if !neptuneVersion.MatchString(version) {
 		return errors.New("invalid Neptune version")
 	}
@@ -292,7 +305,7 @@ func UpdateNeptune(runtimeConfig config.Runtime, headID, version string) error {
 	if !neptuneInstallationComplete() {
 		return installFreshNeptune(ctx, archivePath, staging, head)
 	}
-	return replaceNeptune(ctx, filepath.Join(upgrade, "neptuned"), filepath.Join(upgrade, "neptune.service"))
+	return replaceNeptune(ctx, filepath.Join(upgrade, "neptuned"), filepath.Join(upgrade, "neptune.service"), version)
 }
 
 func neptuneInstallationComplete() bool {
@@ -314,7 +327,7 @@ func extractNeptuneUpgradeFiles(archivePath, target string) error {
 	})
 }
 
-func replaceNeptune(ctx context.Context, binarySource, unitSource string) error {
+func replaceNeptune(ctx context.Context, binarySource, unitSource string, expected ...string) error {
 	unitTarget, err := managedSystemdUnit(neptuneUnit, neptuneManagedUnit)
 	if err != nil {
 		return err
@@ -353,6 +366,9 @@ func replaceNeptune(ctx context.Context, binarySource, unitSource string) error 
 	activationErr := daemonReload(ctx)
 	if activationErr == nil {
 		activationErr = restartNeptune(ctx)
+		if activationErr == nil && len(expected) > 0 {
+			activationErr = verifyRunningComponent("neptune", expected[0])
+		}
 	}
 	if activationErr == nil {
 		_ = os.Remove(binaryPrevious)

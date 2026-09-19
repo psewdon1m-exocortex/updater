@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.4.9 — unreleased
+## 0.5.0 — unreleased
+
+- Standardize update discovery and durable jobs for heads and shared helpers.
+- Require one saved standard ZIP and a signed receipt before a head update;
+  keep rollback bytes in RAM/tmpfs and persist only recovery metadata.
+- Verify the exact running version after activation. Read released Gryphon's
+  in-process version from its admin status socket for backward compatibility.
+- Migrate retained legacy backups and recover interrupted jobs without copying
+  application secrets into deployment metadata.
+
+## 0.4.9
 
 - Permit atomic replacement of Saturn's `/etc/vault/.env.production` inside
   the otherwise strict Updater systemd filesystem sandbox.

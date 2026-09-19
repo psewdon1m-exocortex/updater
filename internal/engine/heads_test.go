@@ -126,7 +126,7 @@ func TestPublicationHeadsUpdateAndRollback(t *testing.T) {
 								t.Fatal("incomplete update")
 							}
 						}
-						if !current.RollbackAvailable || current.DeploymentSnapshot == "" || current.BackupPath == "" {
+						if !current.RollbackAvailable || current.DeploymentSnapshot == "" || current.BackupPath != "" || current.RecoveryMode != "operator-copy" {
 							t.Fatal("rollback evidence missing")
 						}
 						return

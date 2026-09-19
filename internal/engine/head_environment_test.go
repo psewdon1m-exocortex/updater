@@ -28,6 +28,10 @@ func TestHeadEnvironmentMergeAndRollback(t *testing.T) {
 		if err := snapshotDeployment(head, files, snapshot); err != nil {
 			t.Fatal(err)
 		}
+		saved, _ := os.ReadFile(snapshot)
+		if strings.Contains(string(saved), "synthetic-retained") {
+			t.Fatal("snapshot duplicated environment secrets")
+		}
 		if err := applyDeployment(head, files); err != nil {
 			t.Fatal(err)
 		}

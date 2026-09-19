@@ -31,14 +31,12 @@ func normalizeCompletion(job model.Job) model.Job {
 	default:
 		job.FinishedAt = nil
 	}
+	job.Progress = model.JobProgress(job)
 	return job
 }
 
 func New(dir string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "jobs"), 0o750); err != nil {
-		return nil, err
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "backups"), 0o700); err != nil {
 		return nil, err
 	}
 	store := &Store{dir: dir, jobs: map[string]model.Job{}}
@@ -186,6 +184,9 @@ func (s *Store) Prune(maxJobs int, olderThan time.Time) error {
 			return err
 		}
 		if err := os.RemoveAll(filepath.Join(s.dir, "backups", job.ID)); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(filepath.Join(s.dir, "deployments", job.ID)); err != nil {
 			return err
 		}
 		delete(s.jobs, job.ID)
