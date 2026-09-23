@@ -67,4 +67,35 @@ UPDATER_CONTROL_TOKEN=synthetic-control-token
 	if response.Code != 403 || len(store.List()) != 1 {
 		t.Fatal("consumer can update the shared gateway", response.Code)
 	}
+	labEnv := filepath.Join(dir, "laboratory.env")
+	if err := os.WriteFile(labEnv, []byte(strings.ReplaceAll(body, "kernel", "laboratory")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.RegisterHead(runtime.RegistryPath, "laboratory", labEnv); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(model.Job{ID: "wyvern-durable", RequestID: "wyvern-approved-request", HeadID: "laboratory", Service: "wyvern-update", Version: "0.0.2", State: "COMPLETED", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct {
+		token        string
+		confirmation bool
+		status       int
+	}{{"", true, 401}, {"synthetic-control-token", false, 403}, {"synthetic-control-token", true, 200}} {
+		confirmation := "false"
+		if item.confirmation {
+			confirmation = "true"
+		}
+		request := httptest.NewRequest(http.MethodPost, "http://updater.local/v2/components/wyvern/updates",
+			strings.NewReader(`{"head_id":"laboratory","request_id":"wyvern-approved-request","version":"0.0.2","confirm_shared":`+confirmation+"}"))
+		request.Header.Set("X-Updater-Token", item.token)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != item.status {
+			t.Fatalf("shared update authorization: %d want %d: %s", response.Code, item.status, response.Body.String())
+		}
+	}
+	if len(store.List()) != 2 {
+		t.Fatal("shared update retry created a duplicate job")
+	}
 }

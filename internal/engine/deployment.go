@@ -23,13 +23,45 @@ type deploymentFile struct {
 	TrailingNewlines    string   `json:"trailing_newlines,omitempty"`
 }
 
-// Only versioned deployment files are applied. Environment, trust, state and
-// bundled installers are never executed or overwritten by an application update.
+// Only versioned files under the registered application directory are applied.
+// Installed host agents/trust, operator environment and data are not replaced.
 func deploymentNames(service string) map[string]bool {
 	// The host ingress is operator-owned. In particular, Saturn is published
 	// through the server's Nginx configuration, so application releases must
 	// neither require nor overwrite an embedded reverse-proxy configuration.
 	return map[string]bool{"compose.production.yaml": true}
+}
+
+// A Mastermind group carries its own operator documentation and verification
+// tools. Host helper binaries, trust and operator inputs stay outside Apply.
+func allowedDeploymentName(service, name string) bool {
+	if deploymentNames(service)[name] {
+		return true
+	}
+	if service != "mastermind" || path.Clean(name) != name || strings.ContainsAny(name, "\\\x00:") || strings.HasPrefix(name, "/") || strings.HasPrefix(name, "../") {
+		return false
+	}
+	for _, prefix := range []string{"docs/", "integrations/patches/"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	switch name {
+	case "README.md", "requirements.md", "pyproject.toml", "requirements.lock", "requirements.worker.lock", "embedding-model.lock.json",
+		"mastermind-release.json", "mastermind-release.json.sig.json", "packaging/install.py", "packaging/release_verify.py",
+		"vendor/updater/install.sh", "vendor/updater/updater-linux-amd64", "vendor/updater/systemd/updater.service",
+		"vendor/updater/release-trust/updater.pem", "vendor/updater/release-trust/neptune.pem", "vendor/updater/release-trust/gryphon.pem",
+		"packaging/nginx/mastermind-http.conf", "packaging/nginx/mastermind-proxy.conf", "packaging/nginx/mastermind-server.conf.template":
+		return true
+	}
+	return false
+}
+
+func deploymentFileLimit(name string) int64 {
+	if name == "vendor/updater/updater-linux-amd64" {
+		return 32 * 1024 * 1024
+	}
+	return 1024 * 1024
 }
 
 func readDeployment(bundle, service string) (map[string][]byte, error) {
@@ -57,13 +89,13 @@ func readDeployment(bundle, service string) (map[string][]byte, error) {
 			}
 			return errors.New("deployment bundle links and special files are forbidden")
 		}
-		if !wanted[name] && !((service == "chronos" || service == "laboratory") && name == ".env.example") {
+		if !allowedDeploymentName(service, name) && !((service == "chronos" || service == "laboratory") && name == ".env.example") {
 			return nil
 		}
-		if size > 1024*1024 {
+		if size > deploymentFileLimit(name) {
 			return errors.New("deployment configuration exceeds limit")
 		}
-		data, err := io.ReadAll(io.LimitReader(r, 1024*1024+1))
+		data, err := io.ReadAll(io.LimitReader(r, deploymentFileLimit(name)+1))
 		if err != nil {
 			return err
 		}
@@ -128,7 +160,7 @@ func readDeployment(bundle, service string) (map[string][]byte, error) {
 
 func deploymentTarget(head config.HeadConfig, name string) (string, error) {
 	managedEnvironment := (head.Service == "chronos" || head.Service == "laboratory") && name == ".env"
-	if !deploymentNames(head.Service)[name] && !managedEnvironment {
+	if !allowedDeploymentName(head.Service, name) && !managedEnvironment {
 		return "", errors.New("invalid deployment target")
 	}
 	target := filepath.Join(head.ProjectDir, filepath.FromSlash(name))
@@ -201,7 +233,7 @@ func snapshotDeployment(head config.HeadConfig, files map[string][]byte, snapsho
 		if err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() || info.Size() > 1024*1024 {
+		if !info.Mode().IsRegular() || info.Size() > deploymentFileLimit(name) {
 			return errors.New("existing deployment file is invalid")
 		}
 		data, err := os.ReadFile(target)
@@ -255,7 +287,7 @@ func restoreDeployment(head config.HeadConfig, snapshot string) error {
 	if err != nil {
 		return err
 	}
-	if info.Size() > 4*1024*1024 {
+	if info.Size() > 64*1024*1024 {
 		return errors.New("deployment snapshot exceeds limit")
 	}
 	body, err := os.ReadFile(snapshot)
@@ -284,10 +316,12 @@ func restoreDeployment(head config.HeadConfig, snapshot string) error {
 		files = filtered
 	}
 	additionalEnvironment := (head.Service == "chronos" || head.Service == "laboratory") && len(files) == len(deploymentNames(head.Service))+1
-	if len(files) != len(deploymentNames(head.Service)) && !additionalEnvironment {
+	mastermindMetadata := head.Service == "mastermind" && len(files) >= 1 && len(files) <= 256
+	if len(files) != len(deploymentNames(head.Service)) && !additionalEnvironment && !mastermindMetadata {
 		return errors.New("deployment snapshot is incomplete")
 	}
 	seen := map[string]bool{}
+	targets := map[string]string{}
 	for _, file := range files {
 		target, err := deploymentTarget(head, file.Name)
 		if err != nil {
@@ -297,6 +331,19 @@ func restoreDeployment(head config.HeadConfig, snapshot string) error {
 			return errors.New("duplicate deployment snapshot member")
 		}
 		seen[file.Name] = true
+		if int64(len(file.Data)) > deploymentFileLimit(file.Name) || !file.Existed && len(file.Data) != 0 {
+			return errors.New("invalid deployment snapshot file contents")
+		}
+		targets[file.Name] = target
+	}
+	for required := range deploymentNames(head.Service) {
+		if !seen[required] {
+			return errors.New("deployment snapshot omits required configuration")
+		}
+	}
+	// Validate the whole snapshot before changing the first deployment file.
+	for _, file := range files {
+		target := targets[file.Name]
 		if file.Name == ".env" && file.EnvironmentMetadata {
 			current, readErr := os.ReadFile(target)
 			if readErr != nil {

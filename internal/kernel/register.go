@@ -166,7 +166,7 @@ func updaterMetadataKey(key string) bool {
 	if key == "services.saturn.sni" || key == "services.saturn.port" {
 		return true
 	}
-	for _, service := range []string{"kernel", "volt", "saturn", "chronos", "laboratory", "neptune", "gryphon", "updater"} {
+	for _, service := range []string{"kernel", "volt", "saturn", "chronos", "laboratory", "neptune", "gryphon", "updater", "mastermind"} {
 		if key == "repositories."+service+".url" {
 			return true
 		}

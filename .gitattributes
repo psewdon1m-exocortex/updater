@@ -1,0 +1,2 @@
+# Signatures cover exact manifest bytes, including line endings.
+internal/releaseauth/testdata/manifest.json text eol=lf

@@ -405,14 +405,16 @@ func installFreshNeptune(ctx context.Context, archivePath, staging string, head 
 	if err := os.MkdirAll("/etc/neptune", 0o750); err != nil {
 		return err
 	}
-	if err := os.WriteFile("/etc/neptune/kernel.token", []byte(head.KernelServiceToken+"\n"), 0o600); err != nil {
+	if err := writeSecret("/etc/neptune/kernel.token", head.KernelServiceToken, 0); err != nil {
 		return err
 	}
 	command := exec.CommandContext(ctx, "/bin/sh", filepath.Join(target, "install.sh"))
 	command.Dir = target
 	command.Env = append(os.Environ(), "NEPTUNE_KERNEL_URL="+head.KernelURL, "NEPTUNE_KERNEL_TOKEN_FILE=/etc/neptune/kernel.token")
-	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("Neptune installation failed: %s", strings.TrimSpace(string(output)))
+	command.WaitDelay = 5 * time.Second
+	command.Stdout, command.Stderr = io.Discard, io.Discard
+	if err := command.Run(); err != nil {
+		return errors.New("Neptune installation failed or exceeded its bounded deadline")
 	}
 	return restartNeptune(ctx)
 }

@@ -49,6 +49,13 @@ func StartNeptuneInitialization(runtimeConfig config.Runtime, store *state.Store
 	if head.Service != request.ProjectID {
 		return model.Job{}, errors.New("Neptune project must match the registered service")
 	}
+	if request.ProjectID == "mastermind" {
+		local, localErr := url.Parse(head.LocalHealthURL)
+		if localErr != nil || local.Scheme != "http" || local.Host == "" || head.ComposeService != "core" ||
+			request.ExportURL != "http://"+local.Host+"/api/internal/neptune/backup" {
+			return model.Job{}, errors.New("Mastermind enrollment must use its registered loopback export endpoint")
+		}
+	}
 	if !safeNeptuneID.MatchString(request.ProjectID) || !regexpEnrollmentCode.MatchString(strings.TrimSpace(request.EnrollmentCode)) {
 		return model.Job{}, errors.New("Neptune initialization input is invalid")
 	}
@@ -126,6 +133,9 @@ type saturnEnrollment struct {
 	MirrorToken          string `json:"mirrorToken"`
 	MirrorMode           string `json:"mirrorMode"`
 	MirrorTargetFilename string `json:"mirrorTargetFilename"`
+	ReaderToken          string `json:"readerToken"`
+	ReaderRoot           string `json:"readerRoot"`
+	ReaderCapability     string `json:"readerCapability"`
 }
 
 func EnrollNeptuneProject(runtimeConfig config.Runtime, headID, projectID, exportURL, code string) (NeptuneEnrollmentResult, error) {
@@ -210,12 +220,34 @@ func EnrollNeptuneProject(runtimeConfig config.Runtime, headID, projectID, expor
 	exportPath := filepath.Join(clientsDir, projectID+".export.token")
 	saturnPath := filepath.Join(clientsDir, projectID+".saturn.token")
 	mirrorPath := filepath.Join(clientsDir, projectID+".mirror.token")
+	readerPath := filepath.Join(clientsDir, projectID+".reader.token")
 	secrets := map[string]string{controlPath: controlToken, exportPath: exportToken, saturnPath: redeemed.Token}
 	if redeemed.MirrorToken != "" {
 		secrets[mirrorPath] = redeemed.MirrorToken
 	}
+	if redeemed.ReaderToken != "" {
+		secrets[readerPath] = redeemed.ReaderToken
+	}
 	for path, value := range secrets {
 		if err := writeSecret(path, value, gid); err != nil {
+			return NeptuneEnrollmentResult{}, err
+		}
+	}
+	// Mastermind mounts only its own component credential directory. It must
+	// never mount the host-wide Neptune clients directory (archive/reader tokens
+	// and other projects). Atomic replacement is visible through the directory.
+	if projectID == "mastermind" {
+		clientDirectory := filepath.Join(head.ProjectDir, "secrets", "core")
+		info, statErr := os.Lstat(clientDirectory)
+		if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return NeptuneEnrollmentResult{}, errors.New("Mastermind component credential directory is unavailable")
+		}
+		controlPathForCore := filepath.Join(clientDirectory, "neptune_control_token")
+		exportPathForCore := filepath.Join(clientDirectory, "neptune_export_token")
+		if err := writeSecret(controlPathForCore, controlToken, 10001); err != nil {
+			return NeptuneEnrollmentResult{}, err
+		}
+		if err := writeSecret(exportPathForCore, exportToken, 10001); err != nil {
 			return NeptuneEnrollmentResult{}, err
 		}
 	}
@@ -223,6 +255,9 @@ func EnrollNeptuneProject(runtimeConfig config.Runtime, headID, projectID, expor
 	content := fmt.Sprintf("NEPTUNE_BACKUP_EXPORT_URL=%s\nNEPTUNE_CONTROL_TOKEN_FILE=%s\nNEPTUNE_EXPORT_TOKEN_FILE=%s\nNEPTUNE_SATURN_TOKEN_FILE=%s\nNEPTUNE_SATURN_SLUG=%s\nNEPTUNE_BACKUP_ENABLED=false\nNEPTUNE_BACKUP_INTERVAL_HOURS=24\n", exportURL, controlPath, exportPath, saturnPath, redeemed.Slug)
 	if redeemed.MirrorRoot != "" {
 		content += fmt.Sprintf("NEPTUNE_MIRROR_ROOT=%s\nNEPTUNE_MIRROR_TOKEN_FILE=%s\nNEPTUNE_MIRROR_EXPORT_URL=%s\nNEPTUNE_MIRROR_MODE=%s\nNEPTUNE_MIRROR_TARGET_FILENAME=%s\nNEPTUNE_MIRROR_ENABLED=false\nNEPTUNE_MIRROR_INTERVAL_MINUTES=5\n", redeemed.MirrorRoot, mirrorPath, strings.TrimSuffix(exportURL, "/backup")+"/mirror", redeemed.MirrorMode, redeemed.MirrorTargetFilename)
+	}
+	if redeemed.ReaderToken != "" {
+		content += fmt.Sprintf("NEPTUNE_READER_TOKEN_FILE=%s\nNEPTUNE_READER_ROOT=%s\n", readerPath, redeemed.ReaderRoot)
 	}
 	if err := os.WriteFile(projectEnv+".tmp", []byte(content), 0o640); err != nil {
 		return NeptuneEnrollmentResult{}, err
@@ -248,13 +283,17 @@ func EnrollNeptuneProject(runtimeConfig config.Runtime, headID, projectID, expor
 	if uidErr != nil || primaryGIDErr != nil {
 		return NeptuneEnrollmentResult{}, errors.New("Neptune service account IDs are invalid")
 	}
-	registration := exec.Command(neptuneBinary, "register-project", projectID, projectEnv)
+	registrationContext, cancelRegistration := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancelRegistration()
+	registration := exec.CommandContext(registrationContext, neptuneBinary, "register-project", projectID, projectEnv)
+	registration.WaitDelay = 5 * time.Second
 	registration.Env = append(os.Environ(), "HOME=/var/lib/neptune", "DOTNET_BUNDLE_EXTRACT_BASE_DIR=/var/cache/neptune")
 	registration.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{
 		Uid: uint32(uid), Gid: uint32(primaryGID), Groups: []uint32{uint32(gid)},
 	}}
-	if output, commandErr := registration.CombinedOutput(); commandErr != nil {
-		return NeptuneEnrollmentResult{}, fmt.Errorf("Neptune project registration failed: %s", strings.TrimSpace(string(output)))
+	registration.Stdout, registration.Stderr = io.Discard, io.Discard
+	if commandErr := registration.Run(); commandErr != nil {
+		return NeptuneEnrollmentResult{}, errors.New("Neptune project registration failed or exceeded its 60-second deadline")
 	}
 	if err := updateEnvFile(head.EnvFile, map[string]string{
 		"NEPTUNE_PROJECT_ID": projectID, "NEPTUNE_SOCKET_DIR": "/run/neptune", "NEPTUNE_SOCKET_GID": strconv.Itoa(gid),
@@ -268,10 +307,14 @@ func EnrollNeptuneProject(runtimeConfig config.Runtime, headID, projectID, expor
 	// leaves the service able to reach Neptune but unable to authenticate.
 	// Recreate only the enrolled service to bind the new token files without
 	// disturbing any of the other services on the host.
-	command := exec.Command("docker", "compose", "--env-file", head.EnvFile, "-f", head.ComposeFile, "up", "-d", "--no-deps", "--force-recreate", head.ComposeService)
+	restartContext, cancelRestart := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancelRestart()
+	command := exec.CommandContext(restartContext, "docker", "compose", "--env-file", head.EnvFile, "-f", head.ComposeFile, "up", "-d", "--no-deps", "--force-recreate", head.ComposeService)
 	command.Dir = head.ProjectDir
-	if output, commandErr := command.CombinedOutput(); commandErr != nil {
-		return NeptuneEnrollmentResult{}, fmt.Errorf("service restart after Neptune enrollment failed: %s", strings.TrimSpace(string(output)))
+	command.WaitDelay = 5 * time.Second
+	command.Stdout, command.Stderr = io.Discard, io.Discard
+	if commandErr := command.Run(); commandErr != nil {
+		return NeptuneEnrollmentResult{}, errors.New("service restart after Neptune enrollment failed or exceeded its 120-second deadline")
 	}
 	healthContext, cancelHealth := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelHealth()
@@ -315,6 +358,27 @@ func checkNeptuneProject(ctx context.Context, projectID, token string) error {
 	if response.StatusCode != 200 {
 		return errors.New("Neptune project authentication or readiness failed")
 	}
+	if projectID == "mastermind" {
+		var observed struct {
+			Project struct {
+				Mirror struct {
+					Root string `json:"root"`
+					Mode string `json:"mode"`
+				} `json:"mirror"`
+				Reader struct {
+					Root            string `json:"root"`
+					Capability      string `json:"capability"`
+					CredentialReady bool   `json:"credential_ready"`
+				} `json:"reader"`
+			} `json:"project"`
+		}
+		if err := json.NewDecoder(io.LimitReader(response.Body, 1024*1024)).Decode(&observed); err != nil ||
+			observed.Project.Mirror.Root != "mastermind" || observed.Project.Mirror.Mode != "zip-tree" ||
+			observed.Project.Reader.Root != "root" || observed.Project.Reader.Capability != "neptune.resource-reader.v1" ||
+			!observed.Project.Reader.CredentialReady {
+			return errors.New("Mastermind archive, mirror and resource reader are not fully configured")
+		}
+	}
 	return nil
 }
 
@@ -330,6 +394,17 @@ func validateNeptuneEnrollmentProfile(projectID string, redeemed saturnEnrollmen
 			return errors.New("Volt requires a 'Volt ZIP + personal.volt mirror' setup code")
 		}
 	}
+	if projectID == "mastermind" {
+		validToken := regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+		if redeemed.MirrorRoot != "mastermind" || redeemed.MirrorMode != "zip-tree" || redeemed.MirrorTargetFilename != "" ||
+			redeemed.ReaderRoot != "root" || redeemed.ReaderCapability != "neptune.resource-reader.v1" ||
+			!validToken.MatchString(redeemed.Token) || !validToken.MatchString(redeemed.MirrorToken) || !validToken.MatchString(redeemed.ReaderToken) ||
+			redeemed.Token == redeemed.MirrorToken || redeemed.ReaderToken == redeemed.Token || redeemed.ReaderToken == redeemed.MirrorToken {
+			return errors.New("Mastermind requires independent archive, zip-tree mirror and read-only resource credentials")
+		}
+	} else if redeemed.ReaderToken != "" {
+		return errors.New("This service profile does not permit a resource-reader credential")
+	}
 	return nil
 }
 
@@ -343,14 +418,23 @@ func redeemSaturnEnrollment(origin, code string) (saturnEnrollment, error) {
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(origin, "/")+"/api/v1/backup-enrollments/redeem", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("User-Agent", "exocortex-updater")
-	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(request)
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DisableCompression = true
+	transport.ResponseHeaderTimeout = 5 * time.Second
+	defer transport.CloseIdleConnections()
+	response, err := (&http.Client{Timeout: 15 * time.Second, Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(request)
 	if err != nil {
 		return saturnEnrollment{}, err
 	}
 	defer response.Body.Close()
-	payload, readErr := io.ReadAll(io.LimitReader(response.Body, 1024*1024))
+	payload, readErr := io.ReadAll(io.LimitReader(response.Body, 1024*1024+1))
 	if readErr != nil {
 		return saturnEnrollment{}, readErr
+	}
+	if len(payload) > 1024*1024 {
+		return saturnEnrollment{}, errors.New("Saturn enrollment response exceeds its metadata limit")
 	}
 	if response.StatusCode != http.StatusCreated && response.StatusCode != http.StatusOK {
 		return saturnEnrollment{}, fmt.Errorf("Saturn enrollment returned HTTP %d", response.StatusCode)
@@ -358,6 +442,12 @@ func redeemSaturnEnrollment(origin, code string) (saturnEnrollment, error) {
 	var result saturnEnrollment
 	if json.Unmarshal(payload, &result) != nil || result.Token == "" || result.Slug == "" {
 		return saturnEnrollment{}, errors.New("Saturn returned an invalid enrollment response")
+	}
+	// These values enter an EnvironmentFile. Do not let a producer response
+	// introduce a second assignment or shell-sensitive path spelling.
+	if !safeNeptuneID.MatchString(result.Slug) || !safeNeptuneID.MatchString(result.NamespaceSlug) ||
+		!regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`).MatchString(result.DeploymentID) {
+		return saturnEnrollment{}, errors.New("Saturn returned invalid enrollment identifiers")
 	}
 	return result, nil
 }
@@ -370,8 +460,21 @@ func randomToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(value), nil
 }
 func writeSecret(path, value string, gid int) error {
-	temporary := path + ".tmp"
-	if err := os.WriteFile(temporary, []byte(value+"\n"), 0o640); err != nil {
+	file, err := os.CreateTemp(filepath.Dir(path), ".credential-")
+	if err != nil {
+		return err
+	}
+	temporary := file.Name()
+	defer os.Remove(temporary)
+	if _, err := file.Write([]byte(value)); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
 		return err
 	}
 	if err := os.Chown(temporary, 0, gid); err != nil {
@@ -382,7 +485,15 @@ func writeSecret(path, value string, gid int) error {
 	if err := os.Chmod(temporary, 0o640); err != nil {
 		return err
 	}
-	return os.Rename(temporary, path)
+	if err := os.Rename(temporary, path); err != nil {
+		return err
+	}
+	directory, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
 
 func updateEnvFile(path string, replacements map[string]string) error {

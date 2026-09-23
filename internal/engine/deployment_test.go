@@ -174,3 +174,37 @@ func TestDeploymentRejectsUnsafeAndIncompleteBundles(t *testing.T) {
 		})
 	}
 }
+
+func TestMastermindRollbackValidatesEntireMetadataBeforeMutation(t *testing.T) {
+	for _, fault := range []string{"missing-compose", "duplicate", "escape", "oversized"} {
+		t.Run(fault, func(t *testing.T) {
+			head := config.HeadConfig{Service: "mastermind", ProjectDir: t.TempDir(), ComposeFile: "compose.production.yaml"}
+			compose := filepath.Join(head.ProjectDir, head.ComposeFile)
+			if err := os.WriteFile(compose, []byte("current-safe-deployment"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			files := []deploymentFile{{Name: "compose.production.yaml", Existed: true, Data: []byte("old-deployment")}, {Name: "README.md", Existed: false}}
+			switch fault {
+			case "missing-compose":
+				files = files[1:]
+			case "duplicate":
+				files[1] = files[0]
+			case "escape":
+				files[1].Name = "../foreign-file"
+			case "oversized":
+				files[1].Existed, files[1].Data = true, make([]byte, 1024*1024+1)
+			}
+			body, _ := json.Marshal(files)
+			snapshot := filepath.Join(t.TempDir(), "deployment.json")
+			if err := os.WriteFile(snapshot, body, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := restoreDeployment(head, snapshot); err == nil {
+				t.Fatal("unsafe metadata snapshot accepted")
+			}
+			if current, _ := os.ReadFile(compose); string(current) != "current-safe-deployment" {
+				t.Fatal("partial rollback changed deployment before validation completed")
+			}
+		})
+	}
+}

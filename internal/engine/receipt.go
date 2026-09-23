@@ -27,30 +27,38 @@ type BackupReceipt struct {
 	Expires  int64  `json:"expires"`
 }
 
-func VerifyBackupReceipt(request model.UpdateRequest, token string) error {
+func decodeBackupReceipt(request model.UpdateRequest, token string) (BackupReceipt, error) {
 	parts := strings.Split(request.BackupReceipt, ".")
 	if len(parts) != 2 || !request.OperatorSaved || token == "" {
-		return errors.New("save the ZIP on your computer before installing")
+		return BackupReceipt{}, errors.New("save the ZIP on your computer before installing")
 	}
 	body, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil || len(body) > 4096 {
-		return errors.New("invalid backup receipt")
+		return BackupReceipt{}, errors.New("invalid backup receipt")
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return errors.New("invalid backup receipt")
+		return BackupReceipt{}, errors.New("invalid backup receipt")
 	}
 	mac := hmac.New(sha256.New, []byte(token))
 	mac.Write([]byte(parts[0]))
 	if !hmac.Equal(sig, mac.Sum(nil)) {
-		return errors.New("invalid backup receipt signature")
+		return BackupReceipt{}, errors.New("invalid backup receipt signature")
 	}
 	var receipt BackupReceipt
 	if json.Unmarshal(body, &receipt) != nil || receipt.Schema != "exocortex.update-backup.v2" || receipt.Expires < time.Now().Unix() || receipt.Expires > time.Now().Add(20*time.Minute).Unix() {
-		return errors.New("backup receipt expired or invalid; create a fresh ZIP")
+		return BackupReceipt{}, errors.New("backup receipt expired or invalid; create a fresh ZIP")
 	}
 	if receipt.HeadID != request.HeadID || receipt.Service != request.Service || receipt.Version != request.Version || receipt.ID != request.RequestID || receipt.Filename != request.Backup.Filename {
-		return errors.New("backup receipt does not match this installation")
+		return BackupReceipt{}, errors.New("backup receipt does not match this installation")
+	}
+	return receipt, nil
+}
+
+func VerifyBackupReceipt(request model.UpdateRequest, token string) error {
+	receipt, err := decodeBackupReceipt(request, token)
+	if err != nil {
+		return err
 	}
 	data, err := decodeBackup(request.Backup)
 	if err != nil {

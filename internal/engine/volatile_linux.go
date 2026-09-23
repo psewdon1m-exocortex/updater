@@ -78,6 +78,7 @@ func (e *Engine) recoveryFile(id string) (string, func(), error) {
 // StartDownloaded is the only HTTP installation entry point. The receipt is
 // minted by the authenticated head and binds the bytes to one target version.
 func (e *Engine) StartDownloaded(request model.UpdateRequest, token string) (model.Job, error) {
+    if request.Service == "mastermind" { return e.startGroupDownloaded(request, token) }
 	if err := VerifyBackupReceipt(request, token); err != nil {
 		return model.Job{}, err
 	}

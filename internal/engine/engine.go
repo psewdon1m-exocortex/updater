@@ -32,11 +32,38 @@ type Runner interface {
 
 type OSRunner struct{}
 
+type boundedCommandOutput struct {
+	mu       sync.Mutex
+	data     []byte
+	exceeded bool
+}
+
+func (output *boundedCommandOutput) Write(value []byte) (int, error) {
+	output.mu.Lock()
+	defer output.mu.Unlock()
+	remaining := 1024*1024 - len(output.data)
+	if len(value) > remaining {
+		output.exceeded = true
+	}
+	output.data = append(output.data, value[:min(len(value), remaining)]...)
+	// Drain the rest without retaining it; never leave a child blocked on stdout.
+	return len(value), nil
+}
+
 func (OSRunner) Run(ctx context.Context, name string, args, environment []string, directory string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
 	command := exec.CommandContext(ctx, name, args...)
 	command.Dir = directory
 	command.Env = append(os.Environ(), environment...)
-	return command.CombinedOutput()
+	command.WaitDelay = 5 * time.Second
+	output := &boundedCommandOutput{}
+	command.Stdout, command.Stderr = output, output
+	err := command.Run()
+	if output.exceeded {
+		return nil, errors.New("host command output exceeded 1 MiB")
+	}
+	return output.data, err
 }
 
 type Engine struct {
@@ -109,7 +136,9 @@ func (e *Engine) Start(request model.UpdateRequest) (model.Job, error) {
 		return model.Job{}, errors.New("request_id, head_id and service are required")
 	}
 	if previous, ok := e.store.ByRequestID(request.RequestID); ok {
-		if previous.HeadID != request.HeadID || previous.Service != request.Service || previous.Version != request.Version || previous.BackupSHA256 != request.Backup.SHA256 {
+		if previous.HeadID != request.HeadID || previous.Service != request.Service || previous.Version != request.Version ||
+			(request.Service == "mastermind" && (previous.BackupSpoolID != request.Backup.SpoolID || previous.PreparationID != request.PreparationID)) ||
+			(request.Service != "mastermind" && previous.BackupSHA256 != request.Backup.SHA256) {
 			return model.Job{}, errors.New("request id is already in use")
 		}
 		return previous, nil
@@ -121,9 +150,33 @@ func (e *Engine) Start(request model.UpdateRequest) (model.Job, error) {
 	if head.Service != request.Service {
 		return model.Job{}, fmt.Errorf("head %q is registered for service %q", request.HeadID, head.Service)
 	}
-	backupBytes, err := decodeBackup(request.Backup)
-	if err != nil {
-		return model.Job{}, err
+	if request.Service == "mastermind" {
+		if e.runtime.DryRun {
+			return model.Job{}, errors.New("Mastermind Apply is disabled in dry-run mode")
+		}
+		if err := validateMastermindHead(head); err != nil {
+			return model.Job{}, err
+		}
+		if !mastermindRequestID.MatchString(request.RequestID) {
+			return model.Job{}, errors.New("Mastermind request ID must be 32 hexadecimal characters")
+		}
+		if _, err := e.mastermindPreparation(request.HeadID, request.RequestID, request.Version, request.PreparationID); err != nil {
+			return model.Job{}, err
+		}
+	}
+	var backupBytes []byte
+	if request.Backup.SpoolID != "" {
+		if request.Service != "mastermind" || request.Backup.DataBase64 != "" || request.Backup.Filename != "" || request.Backup.SHA256 != "" || request.Backup.RestoreURL != "" {
+			return model.Job{}, errors.New("Mastermind Apply accepts only its sealed backup spool ID")
+		}
+	} else {
+		if request.Service == "mastermind" {
+			return model.Job{}, errors.New("Mastermind requires the streaming backup spool contract")
+		}
+		backupBytes, err = decodeBackup(request.Backup)
+		if err != nil {
+			return model.Job{}, err
+		}
 	}
 	defer clear(backupBytes)
 	releaseOperation, err := e.store.BeginOperation("")
@@ -142,24 +195,42 @@ func (e *Engine) Start(request model.UpdateRequest) (model.Job, error) {
 
 	now := time.Now().UTC()
 	job := model.Job{
-		ID:        fmt.Sprintf("%d-%x", now.Unix(), sha256.Sum256([]byte(request.RequestID))),
-		RequestID: request.RequestID,
-		HeadID:    request.HeadID,
-		Service:   request.Service,
-		Version:   request.Version,
-		State:     "REQUESTED",
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:            fmt.Sprintf("%d-%x", now.Unix(), sha256.Sum256([]byte(request.RequestID))),
+		RequestID:     request.RequestID,
+		HeadID:        request.HeadID,
+		Service:       request.Service,
+		PreparationID: request.PreparationID,
+		Version:       request.Version,
+		State:         "REQUESTED",
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 	if len(job.ID) > 48 {
 		job.ID = job.ID[:48]
 	}
-	job.BackupSHA256, job.BackupFilename = request.Backup.SHA256, request.Backup.Filename
 	job.RecoveryMode = "operator-copy"
-	e.mu.Lock()
-	e.volatile[job.ID] = append([]byte(nil), backupBytes...)
-	e.mu.Unlock()
 	job.RollbackAvailable = false
+	if request.Backup.SpoolID != "" {
+		sum := sha256.Sum256([]byte(request.HeadID + ":" + request.RequestID))
+		job.ID = "spool-" + hex.EncodeToString(sum[:])[:40]
+		path, claimErr := e.store.ClaimSpool(request.HeadID, request.RequestID, request.Backup.SpoolID, job.ID)
+		if claimErr != nil {
+			e.releaseLock()
+			return model.Job{}, claimErr
+		}
+		job.BackupPath, job.BackupSpoolID = path, request.Backup.SpoolID
+		item, _, verifyErr := e.store.ValidatedSpool(request.HeadID, request.RequestID, request.Backup.SpoolID)
+		if verifyErr != nil {
+			e.releaseLock()
+			return model.Job{}, verifyErr
+		}
+		job.BackupSHA256, job.BackupFilename = item.SHA256, item.Filename
+	} else {
+		job.BackupSHA256, job.BackupFilename = request.Backup.SHA256, request.Backup.Filename
+		e.mu.Lock()
+		e.volatile[job.ID] = append([]byte(nil), backupBytes...)
+		e.mu.Unlock()
+	}
 	if err := e.store.Save(job); err != nil {
 		e.clearVolatile(job.ID)
 		e.releaseLock()
@@ -185,10 +256,20 @@ func decodeBackup(backup model.Backup) ([]byte, error) {
 	return body, nil
 }
 
+func (e *Engine) operationTimeout(service string) time.Duration {
+	if service == "mastermind" {
+		return time.Hour
+	}
+	return time.Duration(e.runtime.CommandTimeoutSec) * time.Second
+}
+
 func (e *Engine) run(job model.Job, head config.HeadConfig) {
 	defer e.releaseLock()
 	defer e.clearVolatile(job.ID)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.runtime.CommandTimeoutSec)*time.Second)
+	if job.BackupSpoolID != "" {
+		defer e.store.ReleaseSpool(job.HeadID, job.BackupSpoolID, job.ID)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), e.operationTimeout(job.Service))
 	defer cancel()
 	update := func(stateName, message string) {
 		job.State = stateName
@@ -200,7 +281,7 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 		finalState, message := "FAILED", err.Error()
 		if job.PreviousImage != "" && job.MutationStarted {
 			update("ROLLING_BACK", message)
-			rollbackCtx, cancelRollback := context.WithTimeout(context.Background(), time.Duration(e.runtime.CommandTimeoutSec)*time.Second)
+			rollbackCtx, cancelRollback := context.WithTimeout(context.Background(), e.operationTimeout(job.Service))
 			rollbackErr := e.rollback(rollbackCtx, &job, head)
 			cancelRollback()
 			if rollbackErr != nil {
@@ -245,6 +326,23 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 		return
 	}
 	job.Version = resolved.Manifest.Version
+	if job.Service == "mastermind" {
+		if err := e.applyMastermind(ctx, &job, head, resolved, update); err != nil {
+			fail(err)
+			return
+		}
+		finished := time.Now().UTC()
+		job.State = "COMPLETED"
+		job.Message = "Mastermind component group and data passed functional acceptance"
+		job.UpdatedAt = finished
+		job.FinishedAt = &finished
+		if err := e.store.Save(job); err != nil {
+			fail(err)
+			return
+		}
+		e.prune()
+		return
+	}
 	deployment, err := readDeployment(resolved.ComposePath, job.Service)
 	if err != nil {
 		fail(err)
@@ -379,6 +477,9 @@ func (e *Engine) composeUp(ctx context.Context, head config.HeadConfig) ([]byte,
 }
 
 func (e *Engine) rollback(ctx context.Context, job *model.Job, head config.HeadConfig) error {
+	if head.Service == "mastermind" {
+		return e.rollbackMastermind(ctx, job, head)
+	}
 	if job.RecoveryMode == "operator-copy" {
 		filename, cleanup, err := e.recoveryFile(job.ID)
 		if err != nil {
@@ -485,14 +586,23 @@ func (e *Engine) Rollback(jobID string) (model.Job, error) {
 	if job.PreviousImage == "" || !job.RollbackAvailable {
 		return model.Job{}, errors.New("rollback is unavailable for this job")
 	}
-	if job.RecoveryMode == "operator-copy" && !e.hasVolatile(job.ID) {
+	if job.RecoveryMode == "operator-copy" && job.Service != "mastermind" && !e.hasVolatile(job.ID) {
 		return model.Job{}, errors.New("upload the saved pre-update ZIP to restore this version")
+	}
+	if job.Service == "mastermind" && job.State == "COMPLETED" {
+		return model.Job{}, errors.New("a completed Mastermind update requires a fresh Core rollback barrier")
+	}
+	if job.Service == "mastermind" {
+		item, path, err := e.store.ValidatedSpool(job.HeadID, job.RequestID, job.BackupSpoolID)
+		if err != nil || path != job.BackupPath || item.SHA256 != job.BackupSHA256 {
+			return model.Job{}, errors.New("upload the saved pre-update ZIP before group recovery")
+		}
 	}
 	head, err := config.LoadHead(e.runtime, job.HeadID)
 	if err != nil {
 		return model.Job{}, err
 	}
-	releaseOperation, err := e.store.BeginOperation("")
+	releaseOperation, err := e.store.BeginOperation(job.ID)
 	if err != nil {
 		return model.Job{}, err
 	}
@@ -506,13 +616,17 @@ func (e *Engine) Rollback(jobID string) (model.Job, error) {
 	e.operationRelease = releaseOperation
 	e.mu.Unlock()
 	job.State = "ROLLING_BACK"
+	job.RecoveryPending = false
 	job.FinishedAt = nil
 	job.UpdatedAt = time.Now().UTC()
 	_ = e.store.Save(job)
 	go func() {
 		defer e.releaseLock()
 		defer e.clearVolatile(job.ID)
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.runtime.CommandTimeoutSec)*time.Second)
+		if job.BackupSpoolID != "" {
+			defer e.store.ReleaseSpool(job.HeadID, job.BackupSpoolID, job.ID)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), e.operationTimeout(job.Service))
 		defer cancel()
 		if err := e.rollback(ctx, &job, head); err != nil {
 			job.State, job.Message = "ROLLBACK_FAILED", err.Error()

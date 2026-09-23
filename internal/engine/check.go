@@ -34,5 +34,17 @@ func (e *Engine) Check(headID string) (map[string]any, error) {
 		return nil, err
 	}
 	candidate := resolved.Manifest.Version
-	return map[string]any{"installed_version": head.CurrentVersion, "available_version": candidate, "update_available": candidate != head.CurrentVersion && release.SupportsMinimum(candidate, head.CurrentVersion)}, nil
+	result := map[string]any{"installed_version": head.CurrentVersion, "available_version": candidate, "update_available": candidate != head.CurrentVersion && release.SupportsMinimum(candidate, head.CurrentVersion)}
+	if head.Service == "mastermind" {
+		result["profile"] = "mastermind"
+		result["components"] = []string{"core", "runtime", "worker"}
+		compatible := validateMastermindHead(head) == nil && release.ValidateMastermind(resolved.Manifest) == nil &&
+			release.SupportsMinimum(e.runtime.UpdaterVersion, resolved.Manifest.MinimumUpdaterVersion)
+		if compatible {
+			_, deploymentErr := readDeployment(resolved.ComposePath, "mastermind")
+			compatible = deploymentErr == nil
+		}
+		result["compatible"] = compatible
+	}
+	return result, nil
 }

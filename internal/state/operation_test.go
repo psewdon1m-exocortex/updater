@@ -8,6 +8,30 @@ import (
 	"updater/internal/model"
 )
 
+func TestPendingMastermindRecoveryReservesHostForItsOwnRollback(t *testing.T) {
+	store, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	job := model.Job{ID: "spool-recovery-fixture", Service: "mastermind", State: "ROLLBACK_FAILED", RecoveryPending: true, FinishedAt: &now, CreatedAt: now, UpdatedAt: now}
+	if err := store.Save(job); err != nil {
+		t.Fatal(err)
+	}
+	if release, err := store.BeginOperation(""); err == nil {
+		release()
+		t.Fatal("new operation bypassed pending data recovery")
+	}
+	if !store.HasActiveOperation() {
+		t.Fatal("pending recovery disappeared from host readiness")
+	}
+	release, err := store.BeginOperation(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+}
+
 func TestHostOperationsRemainExclusiveAcrossStoresAndHandoff(t *testing.T) {
 	dir := t.TempDir()
 	a, _ := New(dir)

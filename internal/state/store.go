@@ -14,9 +14,12 @@ import (
 )
 
 type Store struct {
-	dir  string
-	mu   sync.Mutex
-	jobs map[string]model.Job
+	dir         string
+	mu          sync.Mutex
+	jobs        map[string]model.Job
+	spoolMu     sync.Mutex
+	spoolActive map[string]bool
+	spoolQuota  int64
 }
 
 var safeJobID = regexp.MustCompile(`^[A-Za-z0-9-]{1,128}$`)
@@ -158,6 +161,9 @@ func (s *Store) BackupPath(jobID, filename string) (string, error) {
 }
 
 func (s *Store) Prune(maxJobs int, olderThan time.Time) error {
+	if err := s.PruneSpools(time.Now()); err != nil {
+		return err
+	}
 	if maxJobs <= 0 {
 		return nil
 	}
@@ -177,6 +183,9 @@ func (s *Store) Prune(maxJobs int, olderThan time.Time) error {
 		}
 	}
 	for index, job := range items {
+		if job.BackupSpoolID != "" && (job.State == "ROLLBACK_FAILED" || job.FinishedAt == nil || job.FinishedAt.Add(24*time.Hour).After(time.Now())) {
+			continue
+		}
 		if !terminal(job.State) || (index < maxJobs && !job.CreatedAt.Before(olderThan)) {
 			continue
 		}

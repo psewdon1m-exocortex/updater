@@ -38,6 +38,8 @@ func (s Server) Handler() http.Handler {
 	s.componentUpdates(mux)
 	s.lifecycle(mux)
 	s.recovery(mux)
+	s.backupSpools(mux)
+	s.mastermind(mux)
 	mux.HandleFunc("POST /v1/releases/check", func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, 4096)
 		var input struct {
@@ -63,6 +65,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"status": "ok", "service": "updater", "version": s.Version, "busy": s.Engine.Busy() || s.Store.HasActiveOperation(), "update_protocol": 2, "backup_policy": "operator-copy",
+			"capabilities": []string{"mastermind.components.v1", "mastermind.spool.v1", "mastermind.saved-copy.v2", "mastermind.enrollment.v1"},
 		})
 	})
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, _ *http.Request) {

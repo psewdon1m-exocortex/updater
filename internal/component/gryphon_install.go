@@ -30,7 +30,11 @@ func InitializeGryphon(runtime config.Runtime, headID string) (string, error) {
 				return "", err
 			}
 		}
-		return installedGryphonVersion()
+		version, err := installedGryphonVersion()
+		if err == nil && head.Service == "mastermind" && !runtime.DryRun {
+			err = enrollMastermindGryphon()
+		}
+		return version, err
 	}
 	check, err := CheckGryphon(runtime, headID, "0.0.0")
 	if err != nil {
@@ -41,6 +45,11 @@ func InitializeGryphon(runtime config.Runtime, headID string) (string, error) {
 	}
 	if err := UpdateGryphon(runtime, headID, check.AvailableVersion); err != nil {
 		return "", err
+	}
+	if head.Service == "mastermind" && !runtime.DryRun {
+		if err := enrollMastermindGryphon(); err != nil {
+			return "", err
+		}
 	}
 	return check.AvailableVersion, nil
 }

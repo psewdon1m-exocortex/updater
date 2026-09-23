@@ -6,11 +6,11 @@ func ConsumesHelper(service, helper string) bool {
 		return service == "mastermind" || service == "laboratory"
 	}
 	if helper == "gryphon" {
-		return service == "saturn" || service == "chronos"
+		return service == "saturn" || service == "chronos" || service == "mastermind"
 	}
 	if helper == "neptune" {
 		switch service {
-		case "kernel", "volt", "saturn", "chronos", "laboratory":
+		case "kernel", "volt", "saturn", "chronos", "laboratory", "mastermind":
 			return true
 		}
 	}

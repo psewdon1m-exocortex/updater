@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 	"updater/internal/config"
 	"updater/internal/kernel"
@@ -115,7 +116,30 @@ func InstallWyvernManifest(ctx context.Context, path string) error {
 		}
 		return nil
 	}
+	if err := verifyPublishedWyvern(ctx, &http.Client{Timeout: 30 * time.Second}, manifest); err != nil {
+		return err
+	}
 	return (WyvernDeployment{}).Apply(ctx, manifest)
+}
+
+// A valid signature authenticates candidate bytes, but does not authorize staging
+// installations. Embedded consumer bundles must cross the same publication gate.
+func verifyPublishedWyvern(ctx context.Context, client *http.Client, manifest WyvernManifest) error {
+	if manifest.Installer == nil {
+		return errors.New("Wyvern installation requires published installer provenance")
+	}
+	match := regexp.MustCompile(`^https://github.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/releases/download/(wyvern-v[0-9]+\.[0-9]+\.[0-9]+)/wyvern-install\.tar\.gz$`).FindStringSubmatch(manifest.Installer.URL)
+	if match == nil || match[3] != "wyvern-v"+manifest.Version {
+		return errors.New("Wyvern installer provenance is invalid")
+	}
+	selected, err := fetchRelease(ctx, client, match[1], match[2], match[3])
+	if err != nil {
+		return err
+	}
+	if selected.Draft || selected.Prerelease || selected.TagName != match[3] {
+		return errors.New("Wyvern release is not qualified for installation")
+	}
+	return nil
 }
 
 func EnsureWyvern(runtime config.Runtime, headID, requestID string) (string, error) {

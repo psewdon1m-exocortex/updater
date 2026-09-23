@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 	"updater/internal/component"
+	"updater/internal/config"
 	"updater/internal/model"
 	"updater/internal/release"
 )
@@ -17,9 +18,10 @@ import (
 func (s Server) componentUpdates(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v2/components/{component}/updates", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
-			HeadID    string `json:"head_id"`
-			Version   string `json:"version"`
-			RequestID string `json:"request_id"`
+			HeadID        string `json:"head_id"`
+			Version       string `json:"version"`
+			RequestID     string `json:"request_id"`
+			ConfirmShared bool   `json:"confirm_shared,omitempty"`
 		}
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 		decoder.DisallowUnknownFields()
@@ -32,12 +34,21 @@ func (s Server) componentUpdates(mux *http.ServeMux) {
 			return
 		}
 		kind := r.PathValue("component")
-		if kind == "wyvern" && r.Context().Value(operatorDispatchKey{}) != true {
-			writeError(w, 403, errors.New("Shared Wyvern runtime updates require the root operator console"))
-			return
-		}
 		if kind != "updater" && kind != "neptune" && kind != "gryphon" && kind != "wyvern" {
 			writeError(w, 400, errors.New("unknown component"))
+			return
+		}
+		head, err := config.LoadHead(s.Runtime, input.HeadID)
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if kind != "updater" && !component.ConsumesHelper(head.Service, kind) {
+			writeError(w, 403, errors.New("head does not consume the requested helper"))
+			return
+		}
+		if kind == "wyvern" && r.Context().Value(operatorDispatchKey{}) != true && !input.ConfirmShared {
+			writeError(w, 403, errors.New("Confirm that this update affects the shared host gateway"))
 			return
 		}
 		if len(input.RequestID) < 16 || len(input.RequestID) > 128 || !release.Stable(input.Version) {

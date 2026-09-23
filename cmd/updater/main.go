@@ -60,6 +60,7 @@ func main() {
 				if err := engine.CleanupVolatileRecovery(); err != nil {
 					return err
 				}
+				if err := store.CleanupVolatileSpools(); err != nil { return err }
 				return store.CleanupRecoveryStaging()
 			},
 			OnReady: func() {

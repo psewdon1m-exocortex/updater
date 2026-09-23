@@ -136,6 +136,11 @@ func Resolve(ctx context.Context, repositoryURL, service, requestedVersion, stag
 	if manifest.RollbackRestore != "" && !((service == "laboratory" && manifest.RollbackRestore == "laboratory-offline-v1") || (service == "saturn" && manifest.RollbackRestore == "saturn-offline-v1")) {
 		return Resolved{}, errors.New("release manifest rollback_restore is unsupported")
 	}
+	if service == "mastermind" {
+		if err := ValidateMastermind(manifest); err != nil {
+			return Resolved{}, err
+		}
+	}
 	if service == "saturn" && !regexp.MustCompile(`^[a-zA-Z0-9._:/-]+@sha256:[a-f0-9]{64}$`).MatchString(manifest.WebImage) {
 		return Resolved{}, errors.New("Saturn web image must be pinned to a digest")
 	}

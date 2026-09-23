@@ -408,6 +408,14 @@ func (d WyvernDeployment) installUnit(unit string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
+	// Bound service-manager output independently of Docker's rotated stream.
+	journal := d.path("/etc/systemd/journald@wyvern.conf.d/retention.conf")
+	if err := atomicWyvernBytes(journal, []byte(wyvernJournalPolicy), -1); err != nil {
+		return err
+	}
+	if err := os.Chmod(journal, 0644); err != nil {
+		return err
+	}
 	if err := atomicWyvernBytes(target, []byte(unit), -1); err != nil {
 		return err
 	}
@@ -522,11 +530,22 @@ RuntimeDirectoryMode=0750
 EnvironmentFile=/etc/wyvern/wyvern.env
 ExecStartPre=/usr/bin/updater wyvern prepare-runtime
 ExecStartPre=-/usr/bin/docker rm -f exocortex-wyvern
-ExecStart=/usr/bin/docker run --rm --init --name exocortex-wyvern --label io.exocortex.managed=wyvern --read-only --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 128 --memory 256m --cpus 2 --env WYVERN_BOOTSTRAP_FILE=/etc/wyvern/identity/bootstrap.json --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m --mount type=bind,source=/etc/wyvern,target=/etc/wyvern,readonly --mount type=bind,source=/run/wyvern,target=/run/wyvern --mount type=bind,source=/run/wyvern-admin,target=/run/wyvern-admin --mount type=bind,source=/var/lib/wyvern,target=/var/lib/wyvern $WYVERN_IMAGE
+ExecStart=/usr/bin/docker run --rm --init --name exocortex-wyvern --label io.exocortex.managed=wyvern --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 --read-only --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 128 --memory 256m --cpus 2 --env WYVERN_BOOTSTRAP_FILE=/etc/wyvern/identity/bootstrap.json --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m --mount type=bind,source=/etc/wyvern,target=/etc/wyvern,readonly --mount type=bind,source=/run/wyvern,target=/run/wyvern --mount type=bind,source=/run/wyvern-admin,target=/run/wyvern-admin --mount type=bind,source=/var/lib/wyvern,target=/var/lib/wyvern $WYVERN_IMAGE
 ExecStop=/usr/bin/docker stop --time 35 exocortex-wyvern
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=45
+LogNamespace=wyvern
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=200
 [Install]
 WantedBy=multi-user.target
+`
+
+const wyvernJournalPolicy = `[Journal]
+Storage=volatile
+RuntimeMaxUse=16M
+RuntimeMaxFileSize=4M
+MaxRetentionSec=30day
+MaxFileSec=1day
 `

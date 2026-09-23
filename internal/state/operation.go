@@ -26,7 +26,7 @@ func (s *Store) BeginOperation(ownJobID string) (func(), error) {
 	release := func() { once.Do(func() { _ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN); _ = file.Close() }) }
 	for _, listed := range s.List() {
 		job, ok := s.Get(listed.ID)
-		if ok && job.ID != ownJobID && job.FinishedAt == nil {
+		if ok && job.ID != ownJobID && (job.FinishedAt == nil || job.RecoveryPending) {
 			release()
 			return nil, errors.New("another host operation is already running")
 		}
@@ -47,6 +47,11 @@ func (s *Store) ReconcileInterrupted(supervisorActive func(model.Job) bool) erro
 		if job.RecoveryMode == "operator-copy" {
 			job.Message = "Host operation was interrupted; upload the saved pre-update ZIP to recover. The server keeps no backup archive."
 		}
+		if job.Service == "mastermind" && job.MutationStarted {
+            job.State = "ROLLBACK_FAILED"
+            job.Message = "Interrupted group update: upload the saved ZIP to resume recovery"
+            job.RecoveryPending = true
+        }
 		job.UpdatedAt, job.FinishedAt = now, &now
 		if err := s.Save(job); err != nil {
 			return err
@@ -60,7 +65,7 @@ func (s *Store) ReconcileInterrupted(supervisorActive func(model.Job) bool) erro
 
 func (s *Store) HasActiveOperation() bool {
 	for _, listed := range s.List() {
-		if job, ok := s.Get(listed.ID); ok && job.FinishedAt == nil {
+		if job, ok := s.Get(listed.ID); ok && (job.FinishedAt == nil || job.RecoveryPending) {
 			return true
 		}
 	}
