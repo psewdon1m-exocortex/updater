@@ -43,9 +43,11 @@ func TestArrowsAndNoVimBindings(t *testing.T) {
 func TestCredentialFormPasteResizeAndCancel(t *testing.T) {
 	m := loaded()
 	m.selected = 2
-	m.choice = "connect-bot"
-	next, _ := m.selectHead(m.snapshot.Heads[1])
+	next, _ := m.choose("connect-bot")
 	m = next.(Model)
+	if m.screen != form || m.pending.HeadID != "" {
+		t.Fatal("bot registration unexpectedly required a service")
+	}
 	m.fields[0].input.SetValue("private-bot")
 	m.cursor = 1
 	m.fields[0].input.Blur()
@@ -70,6 +72,28 @@ func TestCredentialFormPasteResizeAndCancel(t *testing.T) {
 	m = key(m, tea.KeyEsc)
 	if len(m.fields) != 0 || m.pending.BotToken != "" {
 		t.Fatal("cancel retained credential fields")
+	}
+}
+
+func TestGryphonCheckDoesNotChooseService(t *testing.T) {
+	m := loaded()
+	m.selected = 2
+	next, command := m.choose("check")
+	m = next.(Model)
+	if command == nil || m.screen != result || !m.working || len(m.headChoices) != 0 {
+		t.Fatal("shared Gryphon check opened a service chooser")
+	}
+}
+
+func TestPairingCommandSurvivesStatusRefresh(t *testing.T) {
+	m := loaded()
+	m.screen = result
+	m.activeJob = &console.Job{ID: "pair-1", Component: "gryphon", PairCommand: "/link ABCDE234", PairExpiresAt: "2026-09-27T12:00:00Z", PairBotUsername: "sample_bot"}
+	snapshot := m.snapshot
+	snapshot.Jobs = []console.Job{{ID: "pair-1", Component: "gryphon", State: "COMPLETED", Finished: true}}
+	m = send(m, snapshotMsg{snapshot: snapshot})
+	if m.activeJob == nil || m.activeJob.PairCommand != "/link ABCDE234" {
+		t.Fatal("status refresh discarded one-time pairing command")
 	}
 }
 

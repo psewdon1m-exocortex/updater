@@ -24,8 +24,12 @@ type lifecycleRequest struct {
 var lifecycleStart sync.Mutex
 
 func (s Server) lifecycle(mux *http.ServeMux) {
-	for _, kind := range []string{"gryphon-initialization", "gryphon-bot", "neptune-installation", "wyvern-installation", "updater-self-update"} {
+	for _, kind := range []string{"gryphon-initialization", "neptune-installation", "wyvern-installation", "updater-self-update"} {
 		mux.HandleFunc("POST /v1/lifecycle/"+kind, func(w http.ResponseWriter, r *http.Request) {
+			if kind == "gryphon-initialization" && r.Context().Value(operatorDispatchKey{}) != true {
+				writeError(w, 403, errors.New("Manage the shared Gryphon gateway with updater tui"))
+				return
+			}
 			lifecycleStart.Lock()
 			defer lifecycleStart.Unlock()
 			r.Body = http.MaxBytesReader(w, r.Body, 16384)
@@ -56,7 +60,7 @@ func (s Server) lifecycle(mux *http.ServeMux) {
 				writeError(w, 403, errors.New("head does not consume the requested helper"))
 				return
 			}
-			if kind != "gryphon-bot" && (input.Alias != "" || input.BotToken != "") {
+			if input.Alias != "" || input.BotToken != "" {
 				writeError(w, 400, errors.New("unexpected bot credentials"))
 				return
 			}
@@ -129,9 +133,6 @@ func (s Server) lifecycle(mux *http.ServeMux) {
 						job.Version, err = component.InstallLatestNeptune(s.Runtime, input.HeadID)
 					} else if kind == "wyvern-installation" {
 						job.Version, err = component.EnsureWyvern(s.Runtime, input.HeadID, "link-"+job.ID)
-					} else {
-						err = component.ConnectGryphonBot(s.Runtime, input.HeadID, input.Alias, input.BotToken)
-						input.BotToken = ""
 					}
 					job.UpdatedAt = time.Now().UTC()
 					job.FinishedAt = &job.UpdatedAt

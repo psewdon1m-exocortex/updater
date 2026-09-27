@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"regexp"
 	"time"
-	"updater/internal/config"
 )
 
 func gryphonLocal(ctx context.Context, socket, method, route string, body any) (map[string]any, error) {
@@ -51,20 +50,43 @@ func gryphonHealth(ctx context.Context) error {
 	return err
 }
 
-// No arbitrary admin route or service id may cross the head boundary.
-func ConnectGryphonBot(runtime config.Runtime, headID, alias, token string) error {
-	head, err := config.LoadHead(runtime, headID)
-	if err != nil {
-		return err
-	}
-	if !ConsumesHelper(head.Service, "gryphon") {
-		return errors.New("this head does not consume Gryphon")
-	}
+// Bot registration belongs to the host Gryphon instance, not to a client service.
+type GryphonPairing struct {
+	Command     string
+	ExpiresAt   string
+	BotUsername string
+}
+
+func ConnectGryphonBot(alias, token string) (GryphonPairing, error) {
 	if !regexp.MustCompile(`^[a-z][a-z0-9-]{1,47}$`).MatchString(alias) || !regexp.MustCompile(`^[0-9]{5,}:[A-Za-z0-9_-]{20,200}$`).MatchString(token) {
-		return errors.New("invalid bot alias or token")
+		return GryphonPairing{}, errors.New("invalid bot alias or token")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	_, err = gryphonLocal(ctx, "/run/gryphon-admin/admin.sock", "POST", "/v1/bots", map[string]string{"alias": alias, "botToken": token})
-	return err
+	created, err := gryphonLocal(ctx, "/run/gryphon-admin/admin.sock", "POST", "/v1/bots", map[string]string{"alias": alias, "botToken": token})
+	if err != nil {
+		return GryphonPairing{}, err
+	}
+	bot, ok := created["bot"].(map[string]any)
+	if !ok {
+		return GryphonPairing{}, errors.New("invalid Gryphon bot response")
+	}
+	id, ok := bot["id"].(string)
+	if !ok || !regexp.MustCompile(`^[0-9a-f-]{36}$`).MatchString(id) {
+		return GryphonPairing{}, errors.New("invalid Gryphon bot ID")
+	}
+	if created["paired"] == true {
+		return GryphonPairing{}, nil
+	}
+	challenge, err := gryphonLocal(ctx, "/run/gryphon-admin/admin.sock", "POST", "/v1/bots/"+id+"/link", map[string]string{})
+	if err != nil {
+		return GryphonPairing{}, err
+	}
+	command, _ := challenge["command"].(string)
+	expires, _ := challenge["expiresAt"].(string)
+	username, _ := challenge["botUsername"].(string)
+	if !regexp.MustCompile(`^/link [A-HJ-NP-Z2-9]{8}$`).MatchString(command) || expires == "" {
+		return GryphonPairing{}, errors.New("invalid Gryphon pairing challenge")
+	}
+	return GryphonPairing{Command: command, ExpiresAt: expires, BotUsername: username}, nil
 }

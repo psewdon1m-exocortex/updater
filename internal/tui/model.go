@@ -160,6 +160,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			for _, job := range msg.snapshot.Jobs {
 				if m.activeJob != nil && m.activeJob.ID == job.ID || m.waitingRequest != "" && m.waitingRequest == job.RequestID {
 					copy := job
+					if m.activeJob != nil && m.activeJob.ID == job.ID {
+						copy.PairCommand = m.activeJob.PairCommand
+						copy.PairExpiresAt = m.activeJob.PairExpiresAt
+						copy.PairBotUsername = m.activeJob.PairBotUsername
+					}
 					m.activeJob = &copy
 					m.waitingRequest = ""
 				}
@@ -440,6 +445,28 @@ func (m Model) choose(action string) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.choice = action
+	if m.component().ID == "gryphon" && action == "check" {
+		m.activeJob, m.candidate = nil, nil
+		m.working, m.screen = true, result
+		m.resultLines = []string{"Checking the shared Gryphon release..."}
+		m.generation++
+		generation := m.generation
+		return m, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(m.ctx, 48*time.Second)
+			defer cancel()
+			candidate, err := m.backend.Check(ctx, "gryphon", "")
+			return replyMsg{generation: generation, kind: "check", candidate: &candidate, err: err}
+		}
+	}
+	if m.component().ID == "gryphon" && action == "connect-bot" {
+		m.pending = console.Action{Component: "gryphon", Kind: action}
+		m.clearFields()
+		m.fields = []field{newField("Bot alias", "", false, 48), newField("Telegram bot token", "", true, 210)}
+		m.fields[0].input.Focus()
+		m.screen = form
+		m.cursor = 0
+		return m, textinput.Blink
+	}
 	m.headChoices = nil
 	for _, head := range m.snapshot.Heads {
 		if console.Eligible(head, m.component().ID) {
@@ -605,7 +632,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	m.generation++
 	generation := m.generation
 	return m, func() tea.Msg {
-		ctx, cancel := context.WithTimeout(m.ctx, 48*time.Second)
+		ctx, cancel := context.WithTimeout(m.ctx, 60*time.Second)
 		defer cancel()
 		job, err := m.backend.Act(ctx, action)
 		action.BotToken, action.SetupCode = "", ""

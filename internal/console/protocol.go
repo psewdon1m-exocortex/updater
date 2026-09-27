@@ -15,7 +15,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const Protocol = 1
+const Protocol = 2
 
 var setupCodePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{32}$`)
 var botAliasPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,47}$`)
@@ -40,15 +40,18 @@ type Head struct {
 }
 
 type Job struct {
-	ID        string    `json:"id"`
-	RequestID string    `json:"request_id"`
-	HeadID    string    `json:"head_id"`
-	Component string    `json:"component"`
-	State     string    `json:"state"`
-	Version   string    `json:"version,omitempty"`
-	Summary   string    `json:"summary"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Finished  bool      `json:"finished"`
+	ID              string    `json:"id"`
+	RequestID       string    `json:"request_id"`
+	HeadID          string    `json:"head_id"`
+	Component       string    `json:"component"`
+	State           string    `json:"state"`
+	Version         string    `json:"version,omitempty"`
+	Summary         string    `json:"summary"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	Finished        bool      `json:"finished"`
+	PairCommand     string    `json:"pair_command,omitempty"`
+	PairExpiresAt   string    `json:"pair_expires_at,omitempty"`
+	PairBotUsername string    `json:"pair_bot_username,omitempty"`
 }
 
 type Snapshot struct {
@@ -86,6 +89,7 @@ type Bot struct {
 	Alias    string `json:"alias"`
 	Username string `json:"username"`
 	State    string `json:"state"`
+	Paired   bool   `json:"paired"`
 }
 
 type Backend interface {

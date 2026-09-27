@@ -69,9 +69,13 @@ func (m Model) View() string {
 		if m.demo {
 			header = " [DEMO]" + header
 		}
-		status = " " + console.Text(m.pending.HeadID) + " | " + actionLabel(m.pending.Kind)
+		scope := m.pending.HeadID
+		if scope == "" {
+			scope = "shared host"
+		}
+		status = " " + console.Text(scope) + " | " + actionLabel(m.pending.Kind)
 		if m.pending.Version != "" {
-			status = " " + console.Text(m.pending.HeadID) + " | update " + m.pending.Version
+			status = " " + console.Text(scope) + " | update " + m.pending.Version
 		}
 	}
 	output := []string{m.paint(ansi.Truncate(header, width-1, ""), true, false), ansi.Truncate(status, width-1, ""), strings.Repeat("-", width-1)}
@@ -193,8 +197,8 @@ func (m Model) rows() []row {
 		}
 	case form:
 		heading(title(component.ID) + " / " + actionLabel(m.pending.Kind))
-		if m.pending.Component == "wyvern" {
-			add("Scope: all clients of the local Wyvern instance")
+		if m.pending.Component == "wyvern" || m.pending.Component == "gryphon" && (m.pending.Kind == "update" || m.pending.Kind == "connect-bot") {
+			add("Scope: all clients of the local " + title(m.pending.Component) + " instance")
 		} else {
 			add("Service: " + m.pending.HeadID)
 		}
@@ -202,7 +206,7 @@ func (m Model) rows() []row {
 			add("Create a one-time setup code in Saturn > Synchronization.")
 		}
 		if m.choice == "connect-bot" {
-			add("Bot registration is separate from service and Telegram-user linking.")
+			add("After registration, send the one-time /link command to this bot from its Telegram owner account.")
 		}
 		if m.choice == "connect-kernel" {
 			add("The Access Key is used for one enrollment and is not retained. This host receives scoped management and runtime identities.")
@@ -296,7 +300,18 @@ func (m Model) rows() []row {
 			add("State: " + job.State)
 			add(job.Summary)
 			add("Job: " + job.ID)
-			add("Service: " + job.HeadID)
+			if job.PairCommand != "" {
+				botLabel := "the new bot"
+				if job.PairBotUsername != "" {
+					botLabel = "@" + job.PairBotUsername
+				}
+				add("Send to " + botLabel + ": " + job.PairCommand)
+				add("Expires: " + job.PairExpiresAt)
+				add("After confirmation, services can select this bot in Settings.")
+			}
+			if job.HeadID != "" && job.Component != "gryphon" {
+				add("Service: " + job.HeadID)
+			}
 			if job.Version != "" {
 				add("Version: " + job.Version)
 			}
@@ -304,7 +319,9 @@ func (m Model) rows() []row {
 				add("Status refreshes automatically.")
 			}
 		} else if m.candidate != nil && !m.working {
-			add("Service: " + m.candidate.HeadID)
+			if m.candidate.HeadID != "" {
+				add("Service: " + m.candidate.HeadID)
+			}
 			add("Installed: " + m.candidate.Installed)
 			if m.candidate.UpdateAvailable {
 				add("Available: " + m.candidate.Available)
@@ -330,7 +347,11 @@ func (m Model) rows() []row {
 			add("No retained operations for this component.")
 		}
 		for index, job := range list {
-			selectRow(job.UpdatedAt.Local().Format("01-02 15:04")+"  "+job.State+"  "+job.HeadID, index == m.cursor)
+			scope := job.HeadID
+			if scope == "" {
+				scope = "shared host"
+			}
+			selectRow(job.UpdatedAt.Local().Format("01-02 15:04")+"  "+job.State+"  "+scope, index == m.cursor)
 		}
 		if !m.connected {
 			add("Offline: showing the last observed history.")
@@ -341,7 +362,11 @@ func (m Model) rows() []row {
 			add("No registered bots.")
 		}
 		for _, bot := range m.botList {
-			add(bot.Alias + "  @" + bot.Username + "  " + bot.State)
+			pairState := "awaiting /link"
+			if bot.Paired {
+				pairState = "paired"
+			}
+			add(bot.Alias + "  @" + bot.Username + "  " + bot.State + "  " + pairState)
 		}
 	case help:
 		heading("HELP / " + title(component.ID))
@@ -350,9 +375,9 @@ func (m Model) rows() []row {
 			"Refresh status observes local process state and the running API version. An active unit alone does not mean that its API is healthy.",
 			"If the operator API is offline: inspect sudo systemctl status updater.service. An older daemon may need the matching Updater release and systemd unit.",
 			"For component failures: inspect sudo systemctl status " + component.ID + ".service on this host. Review configuration without copying credentials into logs.",
-			"Release checks need a valid registered service and available Kernel/Volt. Installation independently verifies the selected signed release.",
+			"Release checks need available Kernel/Volt metadata. Gryphon uses one shared host release; installation independently verifies its signature.",
 			"Neptune: create a setup code in Saturn > Synchronization. Verify the loopback export URL for the selected service. Schedules remain in Saturn.",
-			"Gryphon: connecting a bot does not link a service function or authorize a Telegram user. Those remain separate operations.",
+			"Gryphon: register a bot here, send its /link code once in Telegram, then select the paired bot in each service's Settings.",
 			"Wyvern: review Adapters and client bindings, reload configuration, pause or resume requests. These actions affect the shared local instance; Adapter editing and signed installation are separate development gates.",
 			"Operation IDs survive console/SSH loss. Reopen operation history after reconnecting. Never assume a lost response means no operation started.",
 			"After Updater self-update, the console reconnects. Relaunch updater tui to use the new UI version. Host/daemon interruption follows existing recovery rules.",

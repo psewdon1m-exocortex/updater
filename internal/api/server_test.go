@@ -106,8 +106,8 @@ UPDATER_CONTROL_TOKEN=head-secret
 	request.Header.Set("Content-Type", "application/json")
 	response = httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusUnauthorized {
-		t.Fatalf("unexpected unauthenticated Gryphon check status: %d", response.Code)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("service-scoped Gryphon check was not blocked: %d", response.Code)
 	}
 
 	request = httptest.NewRequest(

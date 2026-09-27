@@ -38,6 +38,10 @@ func (s Server) componentUpdates(mux *http.ServeMux) {
 			writeError(w, 400, errors.New("unknown component"))
 			return
 		}
+		if kind == "gryphon" && r.Context().Value(operatorDispatchKey{}) != true {
+			writeError(w, 403, errors.New("Update the shared Gryphon gateway with updater tui"))
+			return
+		}
 		head, err := config.LoadHead(s.Runtime, input.HeadID)
 		if err != nil {
 			writeError(w, 400, err)

@@ -92,6 +92,18 @@ func (s Server) operatorHandler() http.Handler {
 		if !operatorDecode(w, r, &input) {
 			return
 		}
+		if input.Component == "gryphon" && input.HeadID != "" {
+			writeError(w, 400, errors.New("shared Gryphon release checks do not select a service"))
+			return
+		}
+		if input.Component == "gryphon" {
+			var err error
+			input.HeadID, err = s.gryphonReleaseHead()
+			if err != nil {
+				writeError(w, 503, err)
+				return
+			}
+		}
 		if _, err := s.operatorHead(input.HeadID, input.Component); err != nil {
 			writeError(w, 400, err)
 			return
@@ -101,7 +113,11 @@ func (s Server) operatorHandler() http.Handler {
 			writeError(w, 502, errors.New("Release check failed. Verify the running component, Kernel, Volt and release configuration"))
 			return
 		}
-		writeJSON(w, 200, console.Candidate{Component: input.Component, HeadID: input.HeadID, Installed: candidate.InstalledVersion, Available: candidate.AvailableVersion, UpdateAvailable: candidate.UpdateAvailable})
+		shownHead := input.HeadID
+		if input.Component == "gryphon" {
+			shownHead = ""
+		}
+		writeJSON(w, 200, console.Candidate{Component: input.Component, HeadID: shownHead, Installed: candidate.InstalledVersion, Available: candidate.AvailableVersion, UpdateAvailable: candidate.UpdateAvailable})
 	})
 	mux.HandleFunc("POST /v1/actions", s.operatorAction)
 	return withLocalHeaders(mux)
@@ -208,12 +224,21 @@ func operatorJob(job model.Job) console.Job {
 		summary = "Accepted by Updater"
 	case "INSTALLING":
 		summary = "Verifying release and installing"
+		if job.Service == "gryphon-bot" {
+			summary = "Verifying the Telegram bot and registering its webhook"
+		}
 	case "ENROLLING":
 		summary = "Linking the service to Saturn"
 	case "HEALTH_CHECK":
 		summary = "Checking the running version"
 	case "COMPLETED":
 		summary = "Operation completed and verified"
+		if job.Service == "gryphon-bot" {
+			summary = "Bot registered; send the pairing command in Telegram"
+			if job.Message == "Bot already paired with the shared Gryphon gateway" {
+				summary = "Bot is already paired with Gryphon"
+			}
+		}
 	case "FAILED":
 		summary = "Operation failed; check component diagnostics and configuration"
 	case "ROLLED_BACK":
@@ -223,13 +248,41 @@ func operatorJob(job model.Job) console.Job {
 	}
 	// Raw job.Message may contain third-party stderr. Only typed metadata and a
 	// controlled summary cross this boundary, never copied credentials or paths.
-	return console.Job{ID: console.Text(job.ID), RequestID: console.Text(job.RequestID), HeadID: console.Text(job.HeadID), Component: jobComponent(job.Service), State: console.Text(job.State), Version: console.Text(job.Version), Summary: summary, UpdatedAt: job.UpdatedAt, Finished: job.FinishedAt != nil}
+	headID := job.HeadID
+	if job.Service == "gryphon-update" {
+		headID = ""
+	}
+	return console.Job{ID: console.Text(job.ID), RequestID: console.Text(job.RequestID), HeadID: console.Text(headID), Component: jobComponent(job.Service), State: console.Text(job.State), Version: console.Text(job.Version), Summary: summary, UpdatedAt: job.UpdatedAt, Finished: job.FinishedAt != nil}
 }
 
 func (s Server) operatorAction(w http.ResponseWriter, r *http.Request) {
 	var action console.Action
 	if !operatorDecode(w, r, &action) {
 		return
+	}
+	if action.Component == "gryphon" && action.Kind == "connect-bot" {
+		s.operatorGryphonBot(w, action)
+		return
+	}
+	if action.Component == "gryphon" && action.Kind == "update" {
+		if action.HeadID != "" {
+			writeError(w, 400, errors.New("shared Gryphon updates do not select a service"))
+			return
+		}
+		if !operatorRequestID.MatchString(action.RequestID) {
+			writeError(w, 400, errors.New("A valid operation request ID is required"))
+			return
+		}
+		if err := console.ValidateAction(action); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		var err error
+		action.HeadID, err = s.gryphonReleaseHead()
+		if err != nil {
+			writeError(w, 503, err)
+			return
+		}
 	}
 	if action.Component == "wyvern" && action.Kind != "install" && action.Kind != "update" {
 		if !operatorRequestID.MatchString(action.RequestID) {
@@ -271,9 +324,6 @@ func (s Server) operatorAction(w http.ResponseWriter, r *http.Request) {
 	case "enroll":
 		path = "/v1/components/neptune-linux/initialize"
 		payload = model.NeptuneInitializationRequest{RequestID: action.RequestID, HeadID: head.ID, ProjectID: head.Service, ExportURL: action.ExportURL, EnrollmentCode: action.SetupCode}
-	case "connect-bot":
-		path = "/v1/lifecycle/gryphon-bot"
-		payload = lifecycleRequest{HeadID: head.ID, RequestID: action.RequestID, Alias: action.Alias, BotToken: action.BotToken}
 	}
 	if path == "" {
 		writeError(w, 400, errors.New("Unsupported action or invalid action fields"))
