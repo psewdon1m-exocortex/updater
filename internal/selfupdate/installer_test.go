@@ -68,3 +68,27 @@ func TestSignedInstallerExtractionRejectsTraversalLinksAndBinaryMismatch(t *test
 		})
 	}
 }
+
+func TestSameVersionUnitDriftRequiresRepair(t *testing.T) {
+	dir := t.TempDir()
+	installed := filepath.Join(dir, "installed.service")
+	release := filepath.Join(dir, "release.service")
+	if err := os.WriteFile(release, []byte("[Service]\nReadWritePaths=/opt/exocortex\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if matches, err := unitMatchesRelease(installed, release); err != nil || matches {
+		t.Fatalf("missing unit was accepted: matches=%t err=%v", matches, err)
+	}
+	if err := os.WriteFile(installed, []byte("[Service]\nReadWritePaths=/opt/moonli\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if matches, err := unitMatchesRelease(installed, release); err != nil || matches {
+		t.Fatalf("stale unit was accepted: matches=%t err=%v", matches, err)
+	}
+	if err := os.WriteFile(installed, []byte("[Service]\nReadWritePaths=/opt/exocortex\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if matches, err := unitMatchesRelease(installed, release); err != nil || !matches {
+		t.Fatalf("matching unit requires repair: matches=%t err=%v", matches, err)
+	}
+}

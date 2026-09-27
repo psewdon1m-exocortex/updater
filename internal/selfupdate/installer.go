@@ -2,6 +2,7 @@ package selfupdate
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -11,6 +12,21 @@ import (
 	"path/filepath"
 	"updater/internal/config"
 )
+
+func unitMatchesRelease(installedPath, releasePath string) (bool, error) {
+	releaseUnit, err := os.ReadFile(releasePath)
+	if err != nil {
+		return false, err
+	}
+	installedUnit, err := os.ReadFile(installedPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(installedUnit, releaseUnit), nil
+}
 
 func extractInstallation(archive, destination, binaryHash string) (string, error) {
 	file, err := os.Open(archive)

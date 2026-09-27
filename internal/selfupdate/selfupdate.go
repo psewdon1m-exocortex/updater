@@ -156,9 +156,6 @@ func applyVersion(runtime config.Runtime, repositoryURL string, head config.Head
 	if release.SchemaVersion != 1 || release.Service != "updater" || release.Version != expectedVersion {
 		return errors.New("updater release manifest identity mismatch")
 	}
-	if release.Version == runtime.UpdaterVersion {
-		return nil
-	}
 	if !supportsUpgrade(release.Version, runtime.UpdaterVersion) {
 		return errors.New("refusing an Updater downgrade")
 	}
@@ -179,6 +176,15 @@ func applyVersion(runtime config.Runtime, repositoryURL string, head config.Head
 	installerRoot, err := extractInstallation(installerArchive, filepath.Join(staging, "installer"), release.Binary.SHA256)
 	if err != nil {
 		return err
+	}
+	if release.Version == runtime.UpdaterVersion {
+		matches, err := unitMatchesRelease("/etc/systemd/system/updater.service", filepath.Join(installerRoot, "systemd", "updater.service"))
+		if err != nil {
+			return err
+		}
+		if matches {
+			return nil
+		}
 	}
 	if err := os.Chmod(binaryPath, 0755); err != nil {
 		return err

@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -273,6 +274,35 @@ func applyDeployment(head config.HeadConfig, files map[string][]byte) error {
 			return err
 		}
 		if err = atomicDeploymentWrite(target, data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Check the same directories used by atomic deployment and environment writes
+// before recording that host mutation has begun. A stale systemd ReadWritePaths
+// then fails without attempting rollback through the same read-only directory.
+func preflightDeploymentWritable(head config.HeadConfig, files map[string][]byte) error {
+	directories := map[string]bool{filepath.Dir(head.EnvFile): true}
+	for name := range files {
+		target, err := deploymentTarget(head, name)
+		if err != nil {
+			return err
+		}
+		directories[filepath.Dir(target)] = true
+	}
+	for directory := range directories {
+		probe, err := os.CreateTemp(directory, ".updater-preflight-")
+		if err != nil {
+			return fmt.Errorf("deployment directory %s is not writable: %w", directory, err)
+		}
+		name := probe.Name()
+		if err := probe.Close(); err != nil {
+			_ = os.Remove(name)
+			return err
+		}
+		if err := os.Remove(name); err != nil {
 			return err
 		}
 	}
