@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"updater/internal/config"
 )
@@ -172,5 +174,18 @@ func TestDeploymentRejectsUnsafeAndIncompleteBundles(t *testing.T) {
 				t.Fatal("unsafe or incomplete bundle accepted")
 			}
 		})
+	}
+}
+
+func TestDeploymentPreflightRejectsReadOnlyProjectBeforeMutation(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("requires Linux read-only sysfs")
+	}
+	head := config.HeadConfig{
+		Service: "kernel", ProjectDir: "/sys", ComposeFile: "compose.production.yaml", EnvFile: "/sys/updater.env",
+	}
+	err := preflightDeploymentWritable(head, map[string][]byte{"compose.production.yaml": []byte("services: {}\n")})
+	if err == nil || !strings.Contains(err.Error(), "not writable") {
+		t.Fatalf("read-only project passed deployment preflight: %v", err)
 	}
 }

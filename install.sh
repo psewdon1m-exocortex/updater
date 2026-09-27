@@ -137,7 +137,8 @@ if [ -z "$installed_version" ] ||
 elif [ "$candidate_version" != "$installed_version" ]; then
   echo "Keeping installed updater $installed_version; bundled $candidate_version is not newer."
 fi
-if [ "$restart_required" = true ] || [ ! -f /etc/systemd/system/updater.service ]; then
+if [ "$restart_required" = true ] || [ ! -f /etc/systemd/system/updater.service ] ||
+   ! cmp -s "$script_dir/systemd/updater.service" /etc/systemd/system/updater.service; then
   install -m 0644 "$script_dir/systemd/updater.service" /etc/systemd/system/updater.service
   restart_required=true
 fi

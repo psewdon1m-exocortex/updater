@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,19 @@ func (successfulRunner) Run(_ context.Context, name string, args, _ []string, _ 
 		return []byte("ghcr.io/example/kernel@sha256:old\n"), nil
 	}
 	return []byte("ok"), nil
+}
+
+type rollbackFailureRunner struct{ composeUps atomic.Int32 }
+
+func (runner *rollbackFailureRunner) Run(ctx context.Context, name string, args, environment []string, directory string) ([]byte, error) {
+	if name == "docker" && len(args) > 1 && args[0] == "compose" {
+		for _, arg := range args {
+			if arg == "up" && runner.composeUps.Add(1) == 2 {
+				return []byte("safe compose failure"), errors.New("exit status 1")
+			}
+		}
+	}
+	return (successfulRunner{}).Run(ctx, name, args, environment, directory)
 }
 
 func testEngine(t *testing.T, dryRun bool) (*Engine, config.Runtime, *state.Store) {
@@ -248,4 +262,33 @@ func TestFailedHealthCheckAutomaticallyRestoresPreviousImage(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("failed update did not roll back")
+}
+
+func TestRollbackFailureKeepsOriginalUpdateError(t *testing.T) {
+	instance, _, store := testEngine(t, false)
+	instance.runner = &rollbackFailureRunner{}
+	instance.SetTestHostOperations(func(context.Context, string) error {
+		return errors.New("candidate readiness failed")
+	}, nil)
+	job, err := instance.Start(model.UpdateRequest{
+		RequestID: "rollback-failure-cause", HeadID: "kernel", Service: "kernel", Backup: backup(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		current, ok := store.Get(job.ID)
+		if !ok {
+			t.Fatal("job disappeared")
+		}
+		if current.State == "ROLLBACK_FAILED" {
+			if !strings.Contains(current.Message, "candidate readiness failed") || !strings.Contains(current.Message, "previous container failed to start") {
+				t.Fatalf("lost update or rollback failure: %s", current.Message)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("rollback failure did not finish")
 }

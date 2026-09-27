@@ -204,7 +204,7 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 			rollbackErr := e.rollback(rollbackCtx, &job, head)
 			cancelRollback()
 			if rollbackErr != nil {
-				finalState, message = "ROLLBACK_FAILED", rollbackErr.Error()
+				finalState, message = "ROLLBACK_FAILED", fmt.Sprintf("update failed: %s; rollback failed: %s", err, rollbackErr)
 			} else {
 				finalState = "ROLLED_BACK"
 			}
@@ -314,6 +314,10 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 		return
 	}
 	if err := snapshotDeployment(head, deployment, job.DeploymentSnapshot); err != nil {
+		fail(err)
+		return
+	}
+	if err := preflightDeploymentWritable(head, deployment); err != nil {
 		fail(err)
 		return
 	}
@@ -442,7 +446,7 @@ func (e *Engine) rollback(ctx context.Context, job *model.Job, head config.HeadC
 		}
 		args := append(base, "run", "--rm", "--no-deps", "--user", "1000:1000", "-e", "RECOVERY_ARCHIVE_DIR=/recovery-work/archives", "-e", "RECOVERY_SPOOL_DIR=/recovery-work/spool", "-v", scratch+":/recovery-work", "-v", job.BackupPath+":/recovery/rollback.zip:ro", "api", "node", "/app/scripts/recovery-cli.mjs", restoreCommand, "/recovery/rollback.zip", "--confirm-replace")
 		if _, err := e.runner.Run(ctx, "docker", args, restoreEnvironment, head.ProjectDir); err != nil {
-			return errors.New("Saturn snapshot rollback failed")
+			return fmt.Errorf("Saturn snapshot rollback failed: %w", err)
 		}
 	}
 	if output, err := e.composeUp(ctx, head); err != nil {
