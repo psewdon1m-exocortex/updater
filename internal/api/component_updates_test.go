@@ -81,7 +81,7 @@ UPDATER_CONTROL_TOKEN=synthetic-control-token
 		token        string
 		confirmation bool
 		status       int
-	}{{"", true, 401}, {"synthetic-control-token", false, 403}, {"synthetic-control-token", true, 200}} {
+	}{{"", true, 401}, {"synthetic-control-token", false, 403}, {"synthetic-control-token", true, 403}} {
 		confirmation := "false"
 		if item.confirmation {
 			confirmation = "true"

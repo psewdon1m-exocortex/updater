@@ -85,6 +85,44 @@ func TestGryphonCheckDoesNotChooseService(t *testing.T) {
 	}
 }
 
+func TestWyvernCheckDoesNotChooseService(t *testing.T) {
+	m := loaded()
+	m.selected = 3
+	next, command := m.choose("check")
+	m = next.(Model)
+	if command == nil || m.screen != result || !m.working || len(m.headChoices) != 0 {
+		t.Fatal("shared Wyvern check opened a service chooser")
+	}
+}
+
+func TestMissingSharedHelpersOfferInstallation(t *testing.T) {
+	for _, id := range []string{"neptune", "gryphon", "wyvern"} {
+		m := loaded()
+		for index, name := range componentNames {
+			if name == id {
+				m.selected = index
+			}
+		}
+		for index := range m.snapshot.Components {
+			if m.snapshot.Components[index].ID == id {
+				m.snapshot.Components[index].Installed = false
+			}
+		}
+		found := false
+		for _, item := range m.menu() {
+			if item.action == "install" {
+				found = true
+			}
+			if item.action == "check" {
+				t.Fatalf("missing %s offered an update check instead of installation", id)
+			}
+		}
+		if !found {
+			t.Fatalf("missing %s has no TUI installation action", id)
+		}
+	}
+}
+
 func TestPairingCommandSurvivesStatusRefresh(t *testing.T) {
 	m := loaded()
 	m.screen = result

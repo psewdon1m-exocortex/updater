@@ -60,8 +60,8 @@ func (s Server) protocol(mux *http.ServeMux) {
 			writeError(w, 400, err)
 			return
 		}
-		if input.Component == "gryphon" {
-			writeError(w, 403, errors.New("Check shared Gryphon releases with updater tui"))
+		if input.Component == "gryphon" || input.Component == "wyvern" {
+			writeError(w, 403, errors.New("Check shared gateway releases with updater tui"))
 			return
 		}
 		if err := s.authorize(r, input.HeadID); err != nil {

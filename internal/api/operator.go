@@ -92,13 +92,20 @@ func (s Server) operatorHandler() http.Handler {
 		if !operatorDecode(w, r, &input) {
 			return
 		}
-		if input.Component == "gryphon" && input.HeadID != "" {
-			writeError(w, 400, errors.New("shared Gryphon release checks do not select a service"))
+		if (input.Component == "gryphon" || input.Component == "wyvern") && input.HeadID != "" {
+			writeError(w, 400, errors.New("shared gateway release checks do not select a service"))
 			return
 		}
 		if input.Component == "gryphon" {
 			var err error
 			input.HeadID, err = s.gryphonReleaseHead()
+			if err != nil {
+				writeError(w, 503, err)
+				return
+			}
+		} else if input.Component == "wyvern" {
+			var err error
+			input.HeadID, err = s.wyvernReleaseHead()
 			if err != nil {
 				writeError(w, 503, err)
 				return
@@ -114,7 +121,7 @@ func (s Server) operatorHandler() http.Handler {
 			return
 		}
 		shownHead := input.HeadID
-		if input.Component == "gryphon" {
+		if input.Component == "gryphon" || input.Component == "wyvern" {
 			shownHead = ""
 		}
 		writeJSON(w, 200, console.Candidate{Component: input.Component, HeadID: shownHead, Installed: candidate.InstalledVersion, Available: candidate.AvailableVersion, UpdateAvailable: candidate.UpdateAvailable})
@@ -249,7 +256,7 @@ func operatorJob(job model.Job) console.Job {
 	// Raw job.Message may contain third-party stderr. Only typed metadata and a
 	// controlled summary cross this boundary, never copied credentials or paths.
 	headID := job.HeadID
-	if job.Service == "gryphon-update" {
+	if job.Service == "gryphon-update" || job.Service == "wyvern-update" {
 		headID = ""
 	}
 	return console.Job{ID: console.Text(job.ID), RequestID: console.Text(job.RequestID), HeadID: console.Text(headID), Component: jobComponent(job.Service), State: console.Text(job.State), Version: console.Text(job.Version), Summary: summary, UpdatedAt: job.UpdatedAt, Finished: job.FinishedAt != nil}
@@ -264,9 +271,9 @@ func (s Server) operatorAction(w http.ResponseWriter, r *http.Request) {
 		s.operatorGryphonBot(w, action)
 		return
 	}
-	if action.Component == "gryphon" && action.Kind == "update" {
+	if (action.Component == "gryphon" || action.Component == "wyvern") && action.Kind == "update" {
 		if action.HeadID != "" {
-			writeError(w, 400, errors.New("shared Gryphon updates do not select a service"))
+			writeError(w, 400, errors.New("shared gateway updates do not select a service"))
 			return
 		}
 		if !operatorRequestID.MatchString(action.RequestID) {
@@ -278,7 +285,11 @@ func (s Server) operatorAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var err error
-		action.HeadID, err = s.gryphonReleaseHead()
+		if action.Component == "gryphon" {
+			action.HeadID, err = s.gryphonReleaseHead()
+		} else {
+			action.HeadID, err = s.wyvernReleaseHead()
+		}
 		if err != nil {
 			writeError(w, 503, err)
 			return

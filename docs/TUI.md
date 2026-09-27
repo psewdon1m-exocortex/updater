@@ -125,10 +125,13 @@ report is generated after committing and is repeated by CI for the pushed SHA.
 | Updater | Observe process/API/version, check and confirm an exact available update. |
 | Neptune | Observe status, install, enroll a registered service with a Saturn setup code and local export URL, check and confirm updates. |
 | Gryphon | Observe status, install, list bots, connect a bot with masked token input, check and confirm updates. |
-| Wyvern | Observe runtime/configuration/drain state; connect Kernel; edit Google Adapters/profiles and keys; grant/revoke clients; install/update the signed component; reload, pause/resume and inspect retained host-operation history. |
+| Wyvern | Observe runtime/configuration/drain state; install the latest qualified Kernel-listed release when absent; connect Kernel; edit Google Adapters/profiles and keys; grant/revoke clients; check/update the shared signed component without selecting a service; reload, pause/resume and inspect retained host-operation history. |
 
-Release operations require an eligible registered service and its existing
-release configuration. Accepted operations appear in the retained job history.
+Neptune and initial Gryphon/Wyvern installations use an eligible registered
+service's release configuration. Shared Gryphon and Wyvern checks/updates use
+one host release source agreed by registered consumers and do not ask the
+operator to select a service. A fresh Wyvern install leaves client enrollment
+for a later TUI action. Accepted operations appear in retained job history.
 The console reconnects after daemon loss and looks up uncertain requests by
 their request ID; it does not automatically resubmit mutations. Diagnostic
 instructions remain available when the operator API is unavailable.

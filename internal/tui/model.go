@@ -104,7 +104,9 @@ func (m Model) component() console.Component {
 func (m Model) menu() []menuItem {
 	items := []menuItem{{"Refresh status", "refresh"}}
 	if m.selected < 3 {
-		items = append(items, menuItem{"Check for updates", "check"})
+		if m.component().Installed {
+			items = append(items, menuItem{"Check for updates", "check"})
+		}
 		if m.selected > 0 && !m.component().Installed {
 			items = append(items, menuItem{"Install " + title(m.component().ID), "install"})
 		}
@@ -125,7 +127,15 @@ func (m Model) menu() []menuItem {
 		items = append(items, menuItem{"Connect Kernel", "connect-kernel"}, menuItem{"Create / edit Google Adapter", "adapter-put"},
 			menuItem{"Configure Adapter profile", "profile-put"}, menuItem{"Disable Adapter", "adapter-disable"}, menuItem{"Enable Adapter", "adapter-enable"},
 			menuItem{"Delete unused Adapter", "adapter-delete"}, menuItem{"Grant Adapters to client", "client-grant"}, menuItem{"Revoke client", "client-revoke"})
-		items = append(items, menuItem{"Install / link registered service", "install"}, menuItem{"Check for updates", "check"}, menuItem{"Repair runtime", "repair"})
+		if m.component().Installed {
+			items = append(items, menuItem{"Link registered service", "install"})
+		} else {
+			items = append(items, menuItem{"Install Wyvern from Kernel release", "install"})
+		}
+		if m.component().Installed {
+			items = append(items, menuItem{"Check for updates", "check"})
+		}
+		items = append(items, menuItem{"Repair runtime", "repair"})
 	}
 	return append(items, menuItem{"Help / diagnostics", "help"}, menuItem{"Back to applications", "back"})
 }
@@ -425,7 +435,20 @@ func (m Model) choose(action string) (tea.Model, tea.Cmd) {
 			m.screen, m.cursor = confirm, 0
 			return m, nil
 		}
-		if action != "install" && action != "check" {
+		if action == "check" {
+			m.activeJob, m.candidate = nil, nil
+			m.working, m.screen = true, result
+			m.resultLines = []string{"Checking the shared Wyvern release..."}
+			m.generation++
+			generation := m.generation
+			return m, func() tea.Msg {
+				ctx, cancel := context.WithTimeout(m.ctx, 48*time.Second)
+				defer cancel()
+				candidate, err := m.backend.Check(ctx, "wyvern", "")
+				return replyMsg{generation: generation, kind: "check", candidate: &candidate, err: err}
+			}
+		}
+		if action != "install" {
 			return m, nil
 		}
 	}

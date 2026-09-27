@@ -26,8 +26,8 @@ var lifecycleStart sync.Mutex
 func (s Server) lifecycle(mux *http.ServeMux) {
 	for _, kind := range []string{"gryphon-initialization", "neptune-installation", "wyvern-installation", "updater-self-update"} {
 		mux.HandleFunc("POST /v1/lifecycle/"+kind, func(w http.ResponseWriter, r *http.Request) {
-			if kind == "gryphon-initialization" && r.Context().Value(operatorDispatchKey{}) != true {
-				writeError(w, 403, errors.New("Manage the shared Gryphon gateway with updater tui"))
+			if (kind == "gryphon-initialization" || kind == "wyvern-installation") && r.Context().Value(operatorDispatchKey{}) != true {
+				writeError(w, 403, errors.New("Manage the shared gateway with updater tui"))
 				return
 			}
 			lifecycleStart.Lock()
@@ -132,7 +132,7 @@ func (s Server) lifecycle(mux *http.ServeMux) {
 					} else if kind == "neptune-installation" {
 						job.Version, err = component.InstallLatestNeptune(s.Runtime, input.HeadID)
 					} else if kind == "wyvern-installation" {
-						job.Version, err = component.EnsureWyvern(s.Runtime, input.HeadID, "link-"+job.ID)
+						job.Version, err = component.InstallOrLinkWyvern(s.Runtime, input.HeadID, "link-"+job.ID)
 					}
 					job.UpdatedAt = time.Now().UTC()
 					job.FinishedAt = &job.UpdatedAt

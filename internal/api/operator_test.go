@@ -107,16 +107,26 @@ func TestSharedGryphonUpdateDoesNotExposeAnArbitraryReleaseService(t *testing.T)
 	}
 }
 
-func TestSharedGryphonReleaseRoutesRejectServiceSelection(t *testing.T) {
+func TestSharedWyvernUpdateDoesNotExposeAnArbitraryReleaseService(t *testing.T) {
+	now := time.Now().UTC()
+	job := operatorJob(model.Job{ID: "wyvern-update-1", HeadID: "laboratory", Service: "wyvern-update", State: "COMPLETED", CreatedAt: now, UpdatedAt: now})
+	if job.HeadID != "" || job.Component != "wyvern" {
+		t.Fatalf("shared Wyvern update exposed a release service: %+v", job)
+	}
+}
+
+func TestSharedGatewayReleaseRoutesRejectServiceSelection(t *testing.T) {
 	s := operatorFixture(t)
 	for _, item := range []struct{ path, body string }{
 		{"/v1/check", `{"component":"gryphon","head_id":"saturn"}`},
 		{"/v1/actions", `{"component":"gryphon","kind":"update","head_id":"saturn","version":"1.2.3","request_id":"tui-request-123456"}`},
+		{"/v1/check", `{"component":"wyvern","head_id":"laboratory"}`},
+		{"/v1/actions", `{"component":"wyvern","kind":"update","head_id":"laboratory","version":"1.2.3","request_id":"tui-request-123456"}`},
 	} {
 		res := httptest.NewRecorder()
 		s.operatorHandler().ServeHTTP(res, httptest.NewRequest("POST", "http://updater.local"+item.path, strings.NewReader(item.body)))
 		if res.Code != 400 {
-			t.Fatalf("%s selected a service for shared Gryphon: %d", item.path, res.Code)
+			t.Fatalf("%s selected a service for a shared gateway: %d", item.path, res.Code)
 		}
 	}
 }

@@ -38,8 +38,8 @@ func (s Server) componentUpdates(mux *http.ServeMux) {
 			writeError(w, 400, errors.New("unknown component"))
 			return
 		}
-		if kind == "gryphon" && r.Context().Value(operatorDispatchKey{}) != true {
-			writeError(w, 403, errors.New("Update the shared Gryphon gateway with updater tui"))
+		if (kind == "gryphon" || kind == "wyvern") && r.Context().Value(operatorDispatchKey{}) != true {
+			writeError(w, 403, errors.New("Update the shared gateway with updater tui"))
 			return
 		}
 		head, err := config.LoadHead(s.Runtime, input.HeadID)
@@ -49,10 +49,6 @@ func (s Server) componentUpdates(mux *http.ServeMux) {
 		}
 		if kind != "updater" && !component.ConsumesHelper(head.Service, kind) {
 			writeError(w, 403, errors.New("head does not consume the requested helper"))
-			return
-		}
-		if kind == "wyvern" && r.Context().Value(operatorDispatchKey{}) != true && !input.ConfirmShared {
-			writeError(w, 403, errors.New("Confirm that this update affects the shared host gateway"))
 			return
 		}
 		if len(input.RequestID) < 16 || len(input.RequestID) > 128 || !release.Stable(input.Version) {

@@ -191,6 +191,36 @@ func EnsureWyvern(runtime config.Runtime, headID, requestID string) (string, err
 	return version, nil
 }
 
+// InstallOrLinkWyvern keeps the first TUI installation independent of client
+// enrollment. After the host runtime exists, the same TUI action can enroll a
+// selected registered service without reinstalling the shared component.
+func InstallOrLinkWyvern(runtime config.Runtime, headID, requestID string) (string, error) {
+	manifest, err := (WyvernDeployment{}).installed()
+	if err != nil {
+		return "", err
+	}
+	if manifest != nil {
+		return EnsureWyvern(runtime, headID, requestID)
+	}
+	repository, err := wyvernRepository(runtime, headID)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	candidate, err := release.Discover(ctx, repository, "wyvern", "0.0.0")
+	cancel()
+	if err != nil {
+		return "", err
+	}
+	if candidate.AvailableVersion == "" {
+		return "", errors.New("No qualified Wyvern release is available")
+	}
+	if err := UpdateWyvern(runtime, headID, candidate.AvailableVersion); err != nil {
+		return "", err
+	}
+	return candidate.AvailableVersion, nil
+}
+
 func ReadWyvernLink(headID string) (WyvernLink, error) { return (WyvernManager{}).ReadLink(headID) }
 
 // Consumer bootstrap runs under the same host lock as all deployment jobs.

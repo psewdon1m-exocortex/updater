@@ -39,6 +39,9 @@ func TestJobAndHostRecoveryStayInsideHeadBoundary(t *testing.T) {
 		{"GET", "/v1/jobs/private-job", "saturn-token", "", 200},
 		{"GET", "/v1/jobs", "kernel-token", "", 401},
 		{"POST", "/v1/lifecycle/gryphon-initialization", "kernel-token", `{"head_id":"kernel"}`, 403},
+		{"POST", "/v1/lifecycle/wyvern-installation", "kernel-token", `{"head_id":"kernel"}`, 403},
+		{"POST", "/v2/check", "kernel-token", `{"head_id":"kernel","component":"wyvern"}`, 403},
+		{"POST", "/v2/components/wyvern/updates", "kernel-token", `{"head_id":"kernel","version":"1.2.3","request_id":"tui-request-123456"}`, 403},
 		{"POST", "/v1/host-recovery/export", "saturn-token", `{"head_id":"saturn","passphrase":"synthetic recovery password"}`, 403},
 	} {
 		request := httptest.NewRequest(item.method, "http://updater.local"+item.path, strings.NewReader(item.body))

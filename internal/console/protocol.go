@@ -101,7 +101,7 @@ type Backend interface {
 
 func ValidateAction(a Action) error {
 	if a.Component == "wyvern" {
-		if (a.Kind == "install" || a.Kind == "update") && a.Wyvern == nil && a.HeadID != "" && a.ExportURL == "" && a.SetupCode == "" && a.Alias == "" && a.BotToken == "" && ((a.Kind == "install" && a.Version == "") || (a.Kind == "update" && exactVersionPattern.MatchString(a.Version))) {
+		if (a.Kind == "install" || a.Kind == "update") && a.Wyvern == nil && a.ExportURL == "" && a.SetupCode == "" && a.Alias == "" && a.BotToken == "" && ((a.Kind == "install" && a.HeadID != "" && a.Version == "") || (a.Kind == "update" && a.HeadID == "" && exactVersionPattern.MatchString(a.Version))) {
 			return nil
 		}
 		if a.Wyvern != nil {

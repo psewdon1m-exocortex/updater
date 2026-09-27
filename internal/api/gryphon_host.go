@@ -15,9 +15,12 @@ import (
 	"updater/internal/model"
 )
 
-// Gryphon has one runtime per host. Registered heads provide release metadata,
-// but they must agree before a host-wide update is offered.
-func (s Server) gryphonReleaseHead() (string, error) {
+// Gryphon and Wyvern have one runtime each per host. Registered consumers
+// provide release metadata, but they must agree before a host-wide update.
+func (s Server) gryphonReleaseHead() (string, error) { return s.sharedReleaseHead("gryphon") }
+func (s Server) wyvernReleaseHead() (string, error)  { return s.sharedReleaseHead("wyvern") }
+
+func (s Server) sharedReleaseHead(kind string) (string, error) {
 	registry, err := config.LoadRegistry(s.Runtime.RegistryPath)
 	if err != nil {
 		return "", err
@@ -30,25 +33,25 @@ func (s Server) gryphonReleaseHead() (string, error) {
 	selected, repository := "", ""
 	for _, id := range ids {
 		head, err := config.LoadHead(s.Runtime, id)
-		if err != nil || !component.ConsumesHelper(head.Service, "gryphon") {
+		if err != nil || !component.ConsumesHelper(head.Service, kind) {
 			continue
 		}
 		snapshot, err := kernel.Load(head.KernelURL, head.KernelServiceToken, head.KernelCachePath, 5*time.Second)
 		if err != nil {
 			return "", err
 		}
-		value, err := kernel.String(snapshot, "repositories.gryphon.url")
+		value, err := kernel.String(snapshot, "repositories."+kind+".url")
 		if err != nil {
 			return "", err
 		}
 		if selected == "" {
 			selected, repository = id, value
 		} else if value != repository {
-			return "", errors.New("registered services disagree on the Gryphon release repository")
+			return "", errors.New("registered services disagree on the " + kind + " release repository")
 		}
 	}
 	if selected == "" {
-		return "", errors.New("no registered Gryphon consumer provides release configuration")
+		return "", errors.New("no registered " + kind + " consumer provides release configuration")
 	}
 	return selected, nil
 }
