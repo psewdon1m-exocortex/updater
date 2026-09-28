@@ -87,6 +87,7 @@ expected = {
     "updater/install.sh", "updater/updater-linux-amd64",
     "updater/systemd/updater.service", "updater/release-trust/updater.pem",
     "updater/release-trust/neptune.pem", "updater/release-trust/gryphon.pem",
+    "updater/release-trust/wyvern.pem",
 }
 target.mkdir(mode=0o700)
 seen = set()

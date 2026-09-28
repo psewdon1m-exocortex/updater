@@ -20,12 +20,12 @@ func TestSignedInstallerExtractionRejectsTraversalLinksAndBinaryMismatch(t *test
 			file, _ := os.Create(archive)
 			compressed := gzip.NewWriter(file)
 			writer := tar.NewWriter(compressed)
-			members := map[string][]byte{"updater/updater-linux-amd64": binary, "updater/install.sh": []byte("#!/bin/sh\nexit 0\n"), "updater/systemd/updater.service": []byte("[Service]\n"), "updater/release-trust/updater.pem": []byte("updater trust fixture\n"), "updater/release-trust/neptune.pem": []byte("neptune trust fixture\n"), "updater/release-trust/gryphon.pem": []byte("gryphon trust fixture\n")}
+			members := map[string][]byte{"updater/updater-linux-amd64": binary, "updater/install.sh": []byte("#!/bin/sh\nexit 0\n"), "updater/systemd/updater.service": []byte("[Service]\n"), "updater/release-trust/updater.pem": []byte("updater trust fixture\n"), "updater/release-trust/neptune.pem": []byte("neptune trust fixture\n"), "updater/release-trust/gryphon.pem": []byte("gryphon trust fixture\n"), "updater/release-trust/wyvern.pem": []byte("wyvern trust fixture\n")}
 			if scenario == "missing" {
 				delete(members, "updater/install.sh")
 			}
 			if scenario == "missing-trust" {
-				delete(members, "updater/release-trust/gryphon.pem")
+				delete(members, "updater/release-trust/wyvern.pem")
 			}
 			for name, body := range members {
 				_ = writer.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0700, Size: int64(len(body))})
@@ -57,7 +57,7 @@ func TestSignedInstallerExtractionRejectsTraversalLinksAndBinaryMismatch(t *test
 				if _, err = os.Stat(filepath.Join(root, "install.sh")); err != nil {
 					t.Fatal(err)
 				}
-				for _, service := range []string{"updater", "neptune", "gryphon"} {
+				for _, service := range []string{"updater", "neptune", "gryphon", "wyvern"} {
 					if _, err = os.Stat(filepath.Join(root, "release-trust", service+".pem")); err != nil {
 						t.Fatal(err)
 					}

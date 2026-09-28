@@ -1,8 +1,8 @@
 # Update protocol 2 — release preparation
 
-This checkout requires the signed **Updater 0.5.0** package. It has not been
-published by these changes. Publish and verify that dependency before building
-service releases; the bundle pin and minimum updater version must agree.
+This checkout requires the signed **Updater 0.6.0** package. Publish and verify
+that dependency before building service releases; the bundle pin and minimum
+updater version must agree.
 
 ## Operator flow
 
@@ -38,7 +38,7 @@ Job/deployment metadata is retained, not ZIP contents or copied .env secrets.
 
 ## First transition from protocol 1
 
-Publish and verify signed Updater 0.5.0 first; build the new head release with
+Publish and verify signed Updater 0.6.0 first; build the new head release with
 that pinned bundle. Existing release tags and trust anchors stay immutable.
 
 1. Download the old head's normal full ZIP to the operator PC and confirm it is

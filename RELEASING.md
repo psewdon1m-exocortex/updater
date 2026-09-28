@@ -28,8 +28,9 @@ service-qualified `updater-v...` namespace may invoke the release workflow.
    CI verifies that bootstrap can create
    `/etc/exocortex/release-trust/updater.pem` and reject a bad manifest before
    it publishes the installer. That signed installer also carries the pinned
-   public Neptune and Gryphon keys used by typed helper installs. CI publishes
-   SHA-256 files, keyless Sigstore bundles and build provenance. No private key
+   public Neptune and Gryphon keys used by typed helper installs and the public
+   Wyvern key used by typed Adapter installs. CI publishes SHA-256 files,
+   keyless Sigstore bundles and build provenance. No private key
    or trust-on-first-use key downloaded beside a manifest is accepted.
 5. Verify the GitHub release before using `updater update`.
 

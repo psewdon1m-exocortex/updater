@@ -1,6 +1,22 @@
 # Changelog
 
-## 0.5.0 — unreleased
+## 0.6.0 — 2026-09-28
+
+- Manage shared Wyvern releases through the typed component-update path and
+  install its public release key from the signed Updater bundle.
+- Apply paired client identity to Gryphon and Wyvern service bindings while
+  retaining host-scoped helper ownership.
+- Manage saved-copy Mastermind group updates through the unified durable job
+  protocol.
+- Accept `wyvern.pem` in bootstrap and self-update archive verification so the
+  0.6.0 installer can consume the trust bundle it publishes.
+
+## 0.5.1 — 2026-09-27
+
+- Preflight writable deployment and environment paths before recording a head
+  mutation, preserve rollback errors and repair stale Updater systemd units.
+
+## 0.5.0 — 2026-09-27
 
 - Add `updater tui`, an arrow-key operator console for local Updater, Neptune
   and Gryphon management, with a root-only administrative socket, masked

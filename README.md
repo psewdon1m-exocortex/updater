@@ -104,8 +104,8 @@ Secrets, derives its public counterpart and embeds only the public key in that
 versioned bootstrap. On a clean host bootstrap creates
 `/etc/exocortex/release-trust/updater.pem`, verifies
 `updater-release.json` before trusting its artifact locations, and only then
-accepts the signed installer's pinned Neptune and Gryphon public keys. The
-installer writes all three keys under `/etc/exocortex/release-trust`, creates
+accepts the signed installer's pinned Neptune, Gryphon and Wyvern public keys.
+The installer writes all four keys under `/etc/exocortex/release-trust`, creates
 Updater's own `.env`, and installs the daemon. Any existing mismatching key
 fails closed. Installation requires no `scp`, manual release-key fingerprint
 or separately downloaded public key.
@@ -228,11 +228,11 @@ The current six-service deployment, trust, recovery and acceptance contract is d
 ## Unified updates (protocol 2)
 
 See [Update protocol, saved ZIP and first migration](docs/UPDATE-PROTOCOL.md).
-The UI uses Updater **0.5.1**, an exact selected version, the standard ZIP saved
+The UI uses Updater **0.6.0**, an exact selected version, the standard ZIP saved
 on the operator PC, and durable status/progress. Helper updates use the same
 dialog without a backup. No update ZIP is retained on the application host.
 
-Updater 0.5.1 checks deployment and environment directories for sandbox write
+Updater 0.6.0 checks deployment and environment directories for sandbox write
 access before recording a host mutation. If a rollback fails, the job retains
 both the original update error and the rollback error. A signed same-version
 self-update and the installer also repair a stale `updater.service` unit; the
