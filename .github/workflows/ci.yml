@@ -31,7 +31,7 @@ jobs:
         run: go vet ./...
       - name: Validate installer and pinned helper trust
         run: |
-          sh -n bootstrap.sh install.sh scripts/build-release.sh
+          sh -n bootstrap.sh install.sh scripts/build-release.sh scripts/recover-0.5.1-to-0.6.0.sh
           test -s release-trust/neptune.pem
           test -s release-trust/gryphon.pem
       - name: Test

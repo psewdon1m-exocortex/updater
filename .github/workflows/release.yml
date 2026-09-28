@@ -40,7 +40,7 @@ jobs:
 
       - name: Test
         run: |
-          sh -n bootstrap.sh install.sh
+          sh -n bootstrap.sh install.sh scripts/recover-0.5.1-to-0.6.0.sh
           go test ./...
 
       - name: Build release artifacts

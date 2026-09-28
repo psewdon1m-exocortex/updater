@@ -228,7 +228,7 @@ The current six-service deployment, trust, recovery and acceptance contract is d
 ## Unified updates (protocol 2)
 
 See [Update protocol, saved ZIP and first migration](docs/UPDATE-PROTOCOL.md).
-The UI uses Updater **0.6.0**, an exact selected version, the standard ZIP saved
+The UI uses Updater **0.6.1**, an exact selected version, the standard ZIP saved
 on the operator PC, and durable status/progress. Helper updates use the same
 dialog without a backup. No update ZIP is retained on the application host.
 
@@ -237,3 +237,7 @@ access before recording a host mutation. If a rollback fails, the job retains
 both the original update error and the rollback error. A signed same-version
 self-update and the installer also repair a stale `updater.service` unit; the
 daemon must be healthy after its restart before the repair is accepted.
+
+Hosts still running 0.5.1 need the signed one-time
+[0.5.1 → 0.6.0 recovery bridge](docs/RECOVER-0.5.1-TO-0.6.0.md) before normal
+self-update can resume.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1 — 2026-09-28
+
+- Resolve `repositories.wyvern.url` from Kernel Register together with the
+  other supported release repository metadata.
+- Document and validate the signed one-time recovery path for Updater 0.5.1
+  hosts that cannot extract the published 0.6.0 Wyvern trust member.
+
 ## 0.6.0 — 2026-09-28
 
 - Manage shared Wyvern releases through the typed component-update path and
