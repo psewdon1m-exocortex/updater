@@ -20,7 +20,7 @@ func TestLoadResolvesOnlyUpdaterMetadataWithLargeRegister(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		private[fmt.Sprintf("secret%d", i)] = ref
 	}
-	values := map[string]interface{}{"credentials": private, "repositories": map[string]interface{}{"laboratory": map[string]interface{}{"url": ref}}}
+	values := map[string]interface{}{"credentials": private, "repositories": map[string]interface{}{"laboratory": map[string]interface{}{"url": ref}, "wyvern": map[string]interface{}{"url": ref}}}
 	raw, _ := json.Marshal(map[string]interface{}{"values": values})
 	sum := sha256.Sum256(raw)
 	calls := 0
@@ -36,10 +36,10 @@ func TestLoadResolvesOnlyUpdaterMetadataWithLargeRegister(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Error(err)
 		}
-		if len(payload.Keys) != 1 || payload.Keys[0] != "repositories.laboratory.url" {
+		if len(payload.Keys) != 2 || payload.Keys[0] != "repositories.laboratory.url" || payload.Keys[1] != "repositories.wyvern.url" {
 			t.Errorf("unexpected secret resolution: %v", payload.Keys)
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{"schema": "exocortex.register.resolution.v1", "values": map[string]interface{}{"repositories.laboratory.url": map[string]string{"value": "https://github.com/synthetic/laboratory"}}})
+		json.NewEncoder(w).Encode(map[string]interface{}{"schema": "exocortex.register.resolution.v1", "values": map[string]interface{}{"repositories.laboratory.url": map[string]string{"value": "https://github.com/synthetic/laboratory"}, "repositories.wyvern.url": map[string]string{"value": "https://github.com/synthetic/wyvern"}}})
 	}))
 	defer server.Close()
 	cache := filepath.Join(t.TempDir(), "register.json")
@@ -53,6 +53,9 @@ func TestLoadResolvesOnlyUpdaterMetadataWithLargeRegister(t *testing.T) {
 		}
 		if _, err := String(snapshot, "repositories.laboratory.url"); err != nil {
 			t.Fatal(err)
+		}
+		if value, err := String(snapshot, "repositories.wyvern.url"); err != nil || value != "https://github.com/synthetic/wyvern" {
+			t.Fatalf("Wyvern repository was not resolved: %q, %v", value, err)
 		}
 	}
 	if calls != 2 {
