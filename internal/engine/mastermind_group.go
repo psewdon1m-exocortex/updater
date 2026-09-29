@@ -322,7 +322,7 @@ func (e *Engine) applyMastermind(ctx context.Context, job *model.Job, head confi
 		return err
 	}
 	update("HEALTH_CHECK", "verifying Core schema, Vault open, official Runtime/Bridge and Worker")
-	if err = e.checkHealthFn(ctx, head.LocalHealthURL); err != nil {
+	if err = e.checkHeadHealth(ctx, head, head.LocalHealthURL); err != nil {
 		return err
 	}
 	result, err := mastermindControl(ctx, head, "functional", map[string]any{"request_id": job.RequestID})
@@ -336,7 +336,7 @@ func (e *Engine) applyMastermind(ctx context.Context, job *model.Job, head confi
 		return errors.New("Mastermind functional acceptance did not match the signed component group")
 	}
 	if head.PublicHealthURL != "" {
-		if err = e.checkHealthFn(ctx, head.PublicHealthURL); err != nil {
+		if err = e.checkHeadHealth(ctx, head, head.PublicHealthURL); err != nil {
 			return err
 		}
 	}
@@ -372,7 +372,7 @@ func (e *Engine) rollbackMastermind(ctx context.Context, job *model.Job, head co
 	if err := e.startMastermindGroup(ctx, head); err != nil {
 		return err
 	}
-	if err := e.checkHealthFn(ctx, head.LocalHealthURL); err != nil {
+	if err := e.checkHeadHealth(ctx, head, head.LocalHealthURL); err != nil {
 		return err
 	}
 	result, err := mastermindControl(ctx, head, "functional", map[string]any{"request_id": job.RequestID})
