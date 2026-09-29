@@ -46,6 +46,10 @@ jobs:
         run: |
           go test -c -o /tmp/updater-api-tests ./internal/api
           sudo /tmp/updater-api-tests -test.run '^TestOperator(Socket|Unit)'
+      - name: Verify host Kernel machine source as root
+        run: |
+          go test -c -o /tmp/updater-hostrelease-tests ./internal/hostrelease
+          sudo /tmp/updater-hostrelease-tests -test.run '^TestHostSourceFallsBackOnlyWhenKernelConnectionIsUnavailable$'
 
   pre-push-gate:
     name: Pre-push gate

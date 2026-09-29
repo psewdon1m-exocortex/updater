@@ -15,6 +15,9 @@ import (
 )
 
 func TestHostSourceFallsBackOnlyWhenKernelConnectionIsUnavailable(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires a root-owned Kernel machine token")
+	}
 	root := t.TempDir()
 	runtime := config.Runtime{StateDir: root, RegistryPath: filepath.Join(root, "heads.json"), HostConfigPath: filepath.Join(root, "host.json")}
 	token := filepath.Join(root, "machine.token")
