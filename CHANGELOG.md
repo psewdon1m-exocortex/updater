@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.3 — pending release
+## 0.6.3 — 2026-09-29
 
 - Give host components their own Kernel machine connection and per-component
   root TUI fallback sources, with live Kernel priority and no head requirement.
