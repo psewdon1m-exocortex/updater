@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.4 — 2026-09-29
+
+- Wait through Saturn's API and worker readiness window after replacement and
+  rollback, allowing cold startup after its offline migration.
+- Include bounded, allowlisted readiness check states in failed update jobs so
+  operators can distinguish slow startup from a failed dependency without
+  exposing arbitrary health response content.
+
 ## 0.6.3 — 2026-09-29
 
 - Give host components their own Kernel machine connection and per-component

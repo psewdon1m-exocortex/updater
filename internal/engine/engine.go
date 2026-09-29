@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -260,7 +261,11 @@ func (e *Engine) operationTimeout(service string) time.Duration {
 	if service == "mastermind" {
 		return time.Hour
 	}
-	return time.Duration(e.runtime.CommandTimeoutSec) * time.Second
+	timeout := time.Duration(e.runtime.CommandTimeoutSec) * time.Second
+	if service == "saturn" && timeout < 10*time.Minute {
+		return 10 * time.Minute
+	}
+	return timeout
 }
 
 func (e *Engine) run(job model.Job, head config.HeadConfig) {
@@ -439,12 +444,12 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 		return
 	}
 	update("HEALTH_CHECK", "checking local and public endpoints")
-	if err := e.checkHealthFn(ctx, head.LocalHealthURL); err != nil {
+	if err := e.checkHeadHealth(ctx, head, head.LocalHealthURL); err != nil {
 		fail(err)
 		return
 	}
 	if head.PublicHealthURL != "" {
-		if err := e.checkHealthFn(ctx, head.PublicHealthURL); err != nil {
+		if err := e.checkHeadHealth(ctx, head, head.PublicHealthURL); err != nil {
 			fail(err)
 			return
 		}
@@ -553,7 +558,7 @@ func (e *Engine) rollback(ctx context.Context, job *model.Job, head config.HeadC
 	if output, err := e.composeUp(ctx, head); err != nil {
 		return fmt.Errorf("previous container failed to start: %s", strings.TrimSpace(string(output)))
 	}
-	if err := e.checkHealthFn(ctx, head.LocalHealthURL); err != nil {
+	if err := e.checkHeadHealth(ctx, head, head.LocalHealthURL); err != nil {
 		return err
 	}
 	if err := e.checkHeadVersion(ctx, head, job.PreviousVersion, job.PreviousImage); err != nil {
@@ -707,29 +712,93 @@ func setEnvValues(path string, updates map[string]string) error {
 	return os.Rename(temporary, path)
 }
 
+func (e *Engine) checkHeadHealth(ctx context.Context, head config.HeadConfig, rawURL string) error {
+	window := 30 * time.Second
+	if head.Service == "saturn" {
+		// Saturn starts its API, worker and web together after an offline
+		// migration. Its Compose health checks allow up to 195 seconds for
+		// readiness; a 24-second updater probe can roll back healthy images.
+		window = 195 * time.Second
+	}
+	healthCtx, cancel := context.WithTimeout(ctx, window)
+	defer cancel()
+	return e.checkHealthFn(healthCtx, rawURL)
+}
+
 func checkHealth(ctx context.Context, rawURL string) error {
+	return pollHealth(ctx, rawURL, 2*time.Second)
+}
+
+func pollHealth(ctx context.Context, rawURL string, interval time.Duration) error {
 	parsed, err := url.Parse(rawURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
 		return errors.New("health URL is invalid")
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
-	for attempt := 0; attempt < 12; attempt++ {
+	last := "no successful response"
+	for {
 		request, _ := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 		response, err := client.Do(request)
 		if err == nil {
-			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+			body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 			response.Body.Close()
 			if response.StatusCode >= 200 && response.StatusCode < 300 {
 				return nil
 			}
+			last = fmt.Sprintf("HTTP %d%s", response.StatusCode, safeHealthChecks(body))
+		} else {
+			if last == "no successful response" {
+				last = "endpoint unreachable"
+			}
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(2 * time.Second):
+			return fmt.Errorf("health check failed for %s (%s): %w", rawURL, last, ctx.Err())
+		case <-time.After(interval):
 		}
 	}
-	return fmt.Errorf("health check failed for %s", rawURL)
+}
+
+// Only fixed readiness check names and bounded status codes enter a durable
+// job. Never copy an arbitrary health response or dependency error into it.
+func safeHealthChecks(body []byte) string {
+	var response struct {
+		Checks map[string]struct {
+			State  string `json:"state"`
+			Detail string `json:"detail"`
+		} `json:"checks"`
+	}
+	if json.Unmarshal(body, &response) != nil {
+		return ""
+	}
+	var checks []string
+	for _, name := range []string{"database", "storage", "worker"} {
+		check, ok := response.Checks[name]
+		if !ok || check.State != "pass" && check.State != "fail" && check.State != "disabled" {
+			continue
+		}
+		value := name + "=" + check.State
+		if safeHealthCode(check.Detail) {
+			value += ":" + check.Detail
+		}
+		checks = append(checks, value)
+	}
+	if len(checks) == 0 {
+		return ""
+	}
+	return "; " + strings.Join(checks, ", ")
+}
+
+func safeHealthCode(value string) bool {
+	if len(value) == 0 || len(value) > 64 {
+		return false
+	}
+	for _, char := range value {
+		if char != '_' && (char < 'a' || char > 'z') {
+			return false
+		}
+	}
+	return true
 }
 
 func restoreBackup(ctx context.Context, head config.HeadConfig, backupPath string) error {

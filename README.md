@@ -239,9 +239,13 @@ The current six-service deployment, trust, recovery and acceptance contract is d
 ## Unified updates (protocol 2)
 
 See [Update protocol, saved ZIP and first migration](docs/UPDATE-PROTOCOL.md).
-The UI uses Updater **0.6.3**, an exact selected version, the standard ZIP saved
+The UI uses Updater **0.6.4**, an exact selected version, the standard ZIP saved
 on the operator PC, and durable status/progress. Helper updates use the same
 dialog without a backup. No update ZIP is retained on the application host.
+
+Updater 0.6.4 waits for Saturn's Compose readiness window after replacement and
+rollback. If readiness still fails, the durable job records the HTTP status and
+safe database, storage and worker check codes when the endpoint supplies them.
 
 Updater 0.6.0 checks deployment and environment directories for sandbox write
 access before recording a host mutation. If a rollback fails, the job retains
