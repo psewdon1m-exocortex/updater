@@ -100,7 +100,9 @@ func (s Server) operatorHandler() http.Handler {
 		}
 		candidate, err := s.candidate("", input.Component)
 		if err != nil {
-			writeError(w, 502, errors.New("Release check failed. Verify the running component, Kernel, Volt and release configuration"))
+			// The operator listener is root-only. Preserve the bounded, sanitized
+			// cause so a transient Kernel or release-registry failure is actionable.
+			writeError(w, 502, errors.New("Release check failed: "+console.Text(err.Error())))
 			return
 		}
 		writeJSON(w, 200, console.Candidate{Component: input.Component, Installed: candidate.InstalledVersion, Available: candidate.AvailableVersion, UpdateAvailable: candidate.UpdateAvailable, SourceOrigin: candidate.SourceOrigin, SourceReason: candidate.SourceReason})

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.6 — 2026-09-29
+
+- Show the bounded underlying error when a host TUI release check fails, and
+  retry short GitHub release API transport and 5xx interruptions without
+  retrying rate limits or invalid responses.
+- Enforce the existing 20-job/30-day retention policy on daemon startup and
+  each maintenance pass, including successful host TUI operations.
+- Document transient public HTTP 502 responses during single-container updates
+  and the durable-job recovery path.
+
 ## 0.6.5 — 2026-09-29
 
 - Allow the Updater daemon to atomically write Wyvern's namespaced journald

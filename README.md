@@ -166,13 +166,19 @@ server-managed Nginx.
   Updater.
 
 The worker retains at most 20 finished job metadata records, bounded by 30 days.
+Retention is enforced on daemon startup and every minute, including jobs
+created from the host TUI; unfinished jobs and recovery material needed by an
+active operation are not pruned.
 ZIP bytes are cleared from RAM when an operation terminates. Later recovery
 requires uploading the original operator-held ZIP. The systemd journal is rate-limited to 200 messages per
 30 seconds. Unit-level safety defaults remain declared in `updater.service`;
 `/etc/exocortex/updater/.env` is the only Updater environment file and head
 settings remain in each head's own `.env`.
 
-A single container replacement can cause a short connection interruption.
+A single-container update can briefly return HTTP 502 from the public reverse
+proxy while the target API is being replaced. This does not determine the
+result of the durable Updater job: reconnect, read its terminal state and
+verify the running version before starting another update.
 Running work in other services is not stopped. Processes that already resolved
 their configuration may continue with in-memory values; fresh resolution waits
 for Kernel and Volt.
@@ -239,9 +245,13 @@ The current six-service deployment, trust, recovery and acceptance contract is d
 ## Unified updates (protocol 2)
 
 See [Update protocol, saved ZIP and first migration](docs/UPDATE-PROTOCOL.md).
-The UI uses Updater **0.6.5**, an exact selected version, the standard ZIP saved
+The UI uses Updater **0.6.6**, an exact selected version, the standard ZIP saved
 on the operator PC, and durable status/progress. Helper updates use the same
 dialog without a backup. No update ZIP is retained on the application host.
+
+Updater 0.6.6 reports the specific host release-check failure in the root TUI,
+retries brief GitHub release API interruptions, and applies job-history
+retention to host TUI operations as well as application updates.
 
 Updater 0.6.5 prepares and permits Wyvern's dedicated journald policy directory
 inside the daemon sandbox. A failed Wyvern activation can then restore the

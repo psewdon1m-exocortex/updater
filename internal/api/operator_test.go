@@ -131,6 +131,16 @@ func TestSharedGatewayReleaseRoutesRejectServiceSelection(t *testing.T) {
 	}
 }
 
+func TestOperatorReleaseCheckReportsSourceFailure(t *testing.T) {
+	s := operatorFixture(t)
+	request := httptest.NewRequest(http.MethodPost, "http://updater.local/v1/check", strings.NewReader(`{"component":"updater"}`))
+	response := httptest.NewRecorder()
+	s.operatorHandler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "updater release source is unavailable") {
+		t.Fatalf("operator lost the actionable release-source error: %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestOperatorLifecycleRetryReturnsExistingJobWithoutMutation(t *testing.T) {
 	s := operatorFixture(t)
 	now := time.Now().UTC()

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var stableVersion = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
@@ -42,23 +43,9 @@ func Discover(ctx context.Context, repository, service, current string) (Candida
 	if err != nil {
 		return result, err
 	}
-	request, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=100", owner, repo), nil)
+	body, err := releaseMetadata(ctx, fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=100", owner, repo))
 	if err != nil {
 		return result, err
-	}
-	request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("User-Agent", "exocortex-updater")
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		return result, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != 200 {
-		return result, fmt.Errorf("release discovery returned HTTP %d", response.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, 4*1024*1024+1))
-	if err != nil || len(body) > 4*1024*1024 {
-		return result, fmt.Errorf("invalid or oversized release response")
 	}
 	var releases []struct {
 		Tag        string `json:"tag_name"`
@@ -84,4 +71,60 @@ func Discover(ctx context.Context, repository, service, current string) (Candida
 	}
 	result.UpdateAvailable = Upgrade(result.AvailableVersion, current)
 	return result, nil
+}
+
+// GitHub release discovery is a read-only request. Retry a short provider or
+// transport interruption, but never retry rate limits or invalid responses.
+func releaseMetadata(ctx context.Context, endpoint string) ([]byte, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return nil, err
+		}
+		request.Header.Set("Accept", "application/vnd.github+json")
+		request.Header.Set("User-Agent", "exocortex-updater")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			if attempt < 2 && ctx.Err() == nil {
+				if err := waitDiscoveryRetry(ctx, attempt); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			return nil, fmt.Errorf("GitHub release request failed: %w", err)
+		}
+		if response.StatusCode != http.StatusOK {
+			status := response.StatusCode
+			rateLimited := status == http.StatusTooManyRequests || status == http.StatusForbidden && (response.Header.Get("X-RateLimit-Remaining") == "0" || response.Header.Get("Retry-After") != "")
+			response.Body.Close()
+			if rateLimited {
+				return nil, fmt.Errorf("GitHub release API rate limit exhausted (HTTP %d)", status)
+			}
+			if attempt < 2 && (status == http.StatusInternalServerError || status == http.StatusBadGateway || status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout) {
+				if err := waitDiscoveryRetry(ctx, attempt); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			return nil, fmt.Errorf("GitHub release discovery returned HTTP %d", status)
+		}
+		body, err := io.ReadAll(io.LimitReader(response.Body, 4*1024*1024+1))
+		response.Body.Close()
+		if err != nil || len(body) > 4*1024*1024 {
+			return nil, fmt.Errorf("invalid or oversized release response")
+		}
+		return body, nil
+	}
+	return nil, fmt.Errorf("GitHub release discovery retry budget exhausted")
+}
+
+func waitDiscoveryRetry(ctx context.Context, attempt int) error {
+	timer := time.NewTimer(time.Duration(attempt+1) * 200 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

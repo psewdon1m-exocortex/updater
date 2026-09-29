@@ -23,7 +23,7 @@ import (
 	"updater/internal/tui"
 )
 
-var version = "0.6.5"
+var version = "0.6.6"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -63,7 +63,11 @@ func main() {
 				if err := store.CleanupVolatileSpools(); err != nil {
 					return err
 				}
-				return store.CleanupRecoveryStaging()
+				if err := store.CleanupRecoveryStaging(); err != nil {
+					return err
+				}
+				pruneJobs(runtime, store)
+				return nil
 			},
 			OnReady: func() {
 				go func() {
@@ -72,6 +76,7 @@ func main() {
 					// helper socket mounts are retried.
 					time.Sleep(5 * time.Second)
 					for {
+						pruneJobs(runtime, store)
 						component.ReconcileHostHelpers(runtime, store)
 						if release, lockErr := store.BeginOperation(""); lockErr == nil {
 							ctx, cancel := context.WithTimeout(
@@ -315,6 +320,16 @@ func handleNeptune(runtime config.Runtime, args []string) {
 func printJSON(value interface{}) {
 	body, _ := json.MarshalIndent(value, "", "  ")
 	fmt.Println(string(body))
+}
+
+func pruneJobs(runtime config.Runtime, store *state.Store) {
+	if runtime.MaxRetainedJobs <= 0 || runtime.RetentionDays <= 0 {
+		return
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(runtime.RetentionDays) * 24 * time.Hour)
+	if err := store.Prune(runtime.MaxRetainedJobs, cutoff); err != nil {
+		fmt.Fprintf(os.Stderr, "updater job retention warning: %v\n", err)
+	}
 }
 
 func exitIf(err error) {
