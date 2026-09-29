@@ -92,6 +92,7 @@ install -d -o root -g updater -m 0750 /etc/exocortex/units
 install -d -o root -g neptune -m 0750 /etc/neptune
 install -d -o root -g gryphon-clients -m 0750 /etc/gryphon
 install -d -o root -g root -m 0755 /etc/wyvern
+install -d -o root -g root -m 0755 /etc/systemd/journald@wyvern.conf.d
 install -d -o 10001 -g 10001 -m 0750 /run/wyvern /run/wyvern-admin
 install -d -o 10001 -g 10001 -m 0700 /var/lib/wyvern
 install -d -o root -g root -m 0700 /etc/exocortex/wyvern /etc/exocortex/wyvern/clients

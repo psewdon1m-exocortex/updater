@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.5 — 2026-09-29
+
+- Allow the Updater daemon to atomically write Wyvern's namespaced journald
+  policy during activation and rollback. Prepare that narrow directory during
+  signed host installation so service updates can recover inside the sandbox.
+
 ## 0.6.4 — 2026-09-29
 
 - Wait through Saturn's API and worker readiness window after replacement and

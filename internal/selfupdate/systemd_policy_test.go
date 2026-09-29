@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestUpdaterSystemdSandboxAllowsOnlyTheSaturnConfigurationDirectory(t *testing.T) {
+func TestUpdaterSystemdSandboxAllowsWyvernPolicyDirectory(t *testing.T) {
 	_, source, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("cannot resolve test source path")
@@ -31,6 +31,16 @@ func TestUpdaterSystemdSandboxAllowsOnlyTheSaturnConfigurationDirectory(t *testi
 	}
 	if line == "" || !strings.Contains(" "+line+" ", " -/etc/vault ") {
 		t.Fatal("Updater cannot atomically replace Saturn's protected environment file")
+	}
+	if !strings.Contains(" "+line+" ", " /etc/systemd/journald@wyvern.conf.d ") {
+		t.Fatal("Updater cannot atomically replace Wyvern's managed journald policy")
+	}
+	installer, err := os.ReadFile(filepath.Join(filepath.Dir(source), "..", "..", "install.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(installer), "install -d -o root -g root -m 0755 /etc/systemd/journald@wyvern.conf.d") {
+		t.Fatal("signed host preparation does not create Wyvern's journald policy directory")
 	}
 	if strings.Contains(" "+line+" ", " /etc ") || strings.Contains(" "+line+" ", " -/etc ") {
 		t.Fatal("Updater sandbox grants write access to all of /etc")
