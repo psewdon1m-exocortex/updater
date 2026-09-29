@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 	"updater/internal/component"
+	"updater/internal/config"
 	"updater/internal/console"
 	"updater/internal/model"
 )
@@ -32,7 +33,15 @@ func (s Server) manageWyvern(ctx context.Context, action console.Action) error {
 	m := s.wyvernManager()
 	i := action.Wyvern
 	if action.Kind == "connect-kernel" {
+		host, err := config.LoadHost(s.Runtime)
+		if err != nil {
+			return err
+		}
+		if host.KernelURL == "" || i.KernelURL != host.KernelURL { return errors.New("Wyvern Kernel origin must match Updater's host machine connection") }
 		instance := i.InstanceID
+		if instance == "" {
+			instance = host.HostID
+		}
 		if instance == "" {
 			id, err := os.ReadFile("/etc/machine-id")
 			if err != nil {
@@ -41,7 +50,14 @@ func (s Server) manageWyvern(ctx context.Context, action console.Action) error {
 			digest := sha256.Sum256(id)
 			instance = "host-" + hex.EncodeToString(digest[:12])
 		}
-		return m.Connect(ctx, i.KernelURL, i.AccessKey, instance)
+		if host.HostID != "" && instance != host.HostID {
+			return errors.New("Wyvern instance differs from the authorized host machine scope")
+		}
+		machineToken, err := config.HostKernelToken(host)
+		if err != nil {
+			return err
+		}
+		return m.Connect(ctx, i.KernelURL, machineToken, instance)
 	}
 	config, err := m.Configuration(ctx)
 	if err != nil {
@@ -170,7 +186,7 @@ func (s Server) wyvernAction(w http.ResponseWriter, action console.Action) {
 			status, err = console.ControlWyvern(ctx, s.wyvernSocket(), action.Kind)
 		}
 		if action.Wyvern != nil {
-			action.Wyvern.AccessKey, action.Wyvern.APIKey = "", ""
+			action.Wyvern.APIKey = ""
 		}
 		job.UpdatedAt = time.Now().UTC()
 		job.FinishedAt = &job.UpdatedAt

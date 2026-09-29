@@ -65,27 +65,20 @@ func TestWyvernLifecycleActionsAndOfflineBoundary(t *testing.T) {
 }
 
 func TestWyvernSecretsStayMaskedThroughConfirmAndCancel(t *testing.T) {
-	for _, action := range []string{"connect-kernel", "adapter-put"} {
+	for _, action := range []string{"adapter-put"} {
 		m := loaded()
 		m.selected = 3
 		m.choice = action
 		m.width = 100
 		m.height = 32
 		revision := 7
-		if action == "connect-kernel" {
-			revision = 0
-		}
 		next, _ := m.openWyvernForm(revision)
 		m = next.(Model)
 		index := 1
-		if action == "adapter-put" {
-			index = 3
-			m.fields[0].input.SetValue("google")
-			m.fields[1].input.SetValue("Google")
-			m.fields[2].input.SetValue("test-model")
-		} else {
-			m.fields[0].input.SetValue("https://kernel.example.test")
-		}
+		index = 3
+		m.fields[0].input.SetValue("google")
+		m.fields[1].input.SetValue("Google")
+		m.fields[2].input.SetValue("test-model")
 		secret := "synthetic-secret-canary"
 		m.fields[index].input.SetValue(secret)
 		if strings.Contains(m.View(), secret) {

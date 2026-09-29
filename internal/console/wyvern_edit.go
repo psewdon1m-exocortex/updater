@@ -10,7 +10,6 @@ import (
 
 type WyvernInput struct {
 	KernelURL       string   `json:"kernel_url,omitempty"`
-	AccessKey       string   `json:"access_key,omitempty"`
 	InstanceID      string   `json:"instance_id,omitempty"`
 	AdapterID       string   `json:"adapter_id,omitempty"`
 	Name            string   `json:"name,omitempty"`
@@ -41,9 +40,9 @@ func validateWyvernAction(a Action) error {
 	bad := errors.New("Invalid Wyvern operation fields")
 	switch a.Kind {
 	case "connect-kernel":
-		fields("kernel_url", "access_key", "instance_id")
+		fields("kernel_url", "instance_id")
 		u, err := url.Parse(i.KernelURL)
-		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || i.AccessKey == "" || i.InstanceID != "" && !wyvernIdentifier.MatchString(i.InstanceID) {
+		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || i.InstanceID != "" && !wyvernIdentifier.MatchString(i.InstanceID) {
 			return bad
 		}
 	case "adapter-put", "profile-put":

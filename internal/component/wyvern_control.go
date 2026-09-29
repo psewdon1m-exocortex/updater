@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -20,6 +21,7 @@ import (
 )
 
 var wyvernID = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+var ErrWyvernConnectionPending = errors.New("Wyvern upstream connection is pending")
 
 type WyvernProfile struct {
 	Model           string   `json:"model"`
@@ -136,7 +138,7 @@ func (m WyvernManager) request(ctx context.Context, method, origin, route string
 	}
 	response, err := client.Do(req)
 	if err != nil {
-		return nil, errors.New("Kernel connection unavailable; inspect the operation before retrying")
+		return nil, fmt.Errorf("%w: Kernel connection unavailable: %v", ErrWyvernConnectionPending, err)
 	}
 	defer response.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(response.Body, 524289))
@@ -147,7 +149,7 @@ func (m WyvernManager) request(ctx context.Context, method, origin, route string
 		return nil, errors.New("Wyvern configuration changed; refresh before applying the change")
 	}
 	if response.StatusCode == 401 || response.StatusCode == 403 {
-		return nil, errors.New("Kernel rejected the connection identity or its permissions")
+		return nil, fmt.Errorf("%w: Kernel rejected the connection identity or its permissions", ErrWyvernConnectionPending)
 	}
 	if response.StatusCode != 200 {
 		return nil, errors.New("Kernel rejected the Wyvern operation; inspect configuration and permissions")
@@ -223,36 +225,14 @@ func (m WyvernManager) identity() (wyvernManagerIdentity, error) {
 	}
 	return identity, nil
 }
-func (m WyvernManager) Connect(ctx context.Context, origin, accessKey, instance string) error {
+func (m WyvernManager) Connect(ctx context.Context, origin, machineToken, instance string) error {
 	origin, err := wyvernOrigin(origin)
 	if err != nil {
 		return err
 	}
-	if !wyvernID.MatchString(instance) || accessKey == "" {
-		return errors.New("Kernel Access Key and a valid host instance ID are required")
+	if !wyvernID.MatchString(instance) || machineToken == "" {
+		return errors.New("Updater machine token and a valid host instance ID are required")
 	}
-	var signedIn struct {
-		Authenticated bool `json:"authenticated"`
-	}
-	response, err := m.request(ctx, "POST", origin, "/api/auth/login", map[string]string{"access_key": accessKey}, nil, &signedIn)
-	if err != nil {
-		return err
-	}
-	if !signedIn.Authenticated {
-		return errors.New("Kernel authentication was not verified")
-	}
-	cookie := ""
-	for _, candidate := range response.Cookies() {
-		if candidate.Name == "kernel_session" {
-			cookie = candidate.Name + "=" + candidate.Value
-		}
-	}
-	if cookie == "" {
-		return errors.New("Kernel did not issue an operator session")
-	}
-	defer func() {
-		_, _ = m.request(context.Background(), "POST", origin, "/api/auth/logout", nil, map[string]string{"Cookie": cookie}, nil)
-	}()
 	// Reconnecting an existing identity is idempotent. Changing hosts/instances
 	// needs an explicit migration so existing consumer tokens are not stranded.
 	existing, existingErr := m.identity()
@@ -305,8 +285,8 @@ func (m WyvernManager) Connect(ctx context.Context, origin, accessKey, instance 
 	if existingErr == nil {
 		identity = existing
 	}
-	// A durable pending identity survives a lost enrollment response; no Access
-	// Key or operator session is written to disk.
+	// A durable pending identity survives a lost enrollment response; the
+	// Updater machine token is never written into Wyvern's identity.
 	pending := m.identityPath() + ".pending"
 	if body, readErr := os.ReadFile(pending); readErr == nil {
 		var prior wyvernManagerIdentity
@@ -322,7 +302,7 @@ func (m WyvernManager) Connect(ctx context.Context, origin, accessKey, instance 
 		ConfigKey  string `json:"config_key"`
 		InstanceID string `json:"instance_id"`
 	}
-	_, err = m.request(ctx, "POST", origin, "/api/wyvern/instances/"+instance+"/enroll", map[string]string{"manager_token_sha256": hashToken(identity.Token), "runtime_token_sha256": hashToken(identity.RuntimeToken)}, map[string]string{"Cookie": cookie}, &result)
+	_, err = m.request(ctx, "POST", origin, "/api/wyvern/instances/"+instance+"/enroll", map[string]string{"host_id": instance, "manager_token_sha256": hashToken(identity.Token), "runtime_token_sha256": hashToken(identity.RuntimeToken)}, map[string]string{"Authorization": "Bearer " + machineToken}, &result)
 	if err != nil {
 		return err
 	}

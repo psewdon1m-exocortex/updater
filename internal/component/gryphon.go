@@ -22,7 +22,7 @@ import (
 	"updater/internal/releaseauth"
 
 	"updater/internal/config"
-	"updater/internal/kernel"
+	"updater/internal/hostrelease"
 )
 
 const gryphonApp = "/usr/local/lib/gryphon/app"
@@ -53,19 +53,11 @@ func CheckGryphon(runtimeConfig config.Runtime, headID, currentVersion string) (
 	if !neptuneVersion.MatchString(strings.TrimSuffix(currentVersion, "-dev")) && !neptuneVersion.MatchString(currentVersion) {
 		return GryphonReleaseCheck{}, errors.New("invalid installed Gryphon version")
 	}
-	head, err := config.LoadHead(runtimeConfig, headID)
+	source, err := hostrelease.Resolve(runtimeConfig, "gryphon")
 	if err != nil {
 		return GryphonReleaseCheck{}, err
 	}
-	snapshot, err := kernel.Load(head.KernelURL, head.KernelServiceToken, head.KernelCachePath, 5*time.Second)
-	if err != nil {
-		return GryphonReleaseCheck{}, err
-	}
-	repositoryURL, err := kernel.String(snapshot, "repositories.gryphon.url")
-	if err != nil {
-		return GryphonReleaseCheck{}, err
-	}
-	owner, repository, err := gryphonRepository(repositoryURL)
+	owner, repository, err := gryphonRepository(source.Repository)
 	if err != nil {
 		return GryphonReleaseCheck{}, err
 	}
@@ -124,19 +116,11 @@ func UpdateGryphon(runtimeConfig config.Runtime, headID, version string) error {
 		return errors.New("requested Gryphon version is not the current upgrade candidate")
 	}
 
-	head, err := config.LoadHead(runtimeConfig, headID)
+	source, err := hostrelease.Resolve(runtimeConfig, "gryphon")
 	if err != nil {
 		return err
 	}
-	snapshot, err := kernel.Load(head.KernelURL, head.KernelServiceToken, head.KernelCachePath, 5*time.Second)
-	if err != nil {
-		return err
-	}
-	repositoryURL, err := kernel.String(snapshot, "repositories.gryphon.url")
-	if err != nil {
-		return err
-	}
-	owner, repository, err := gryphonRepository(repositoryURL)
+	owner, repository, err := gryphonRepository(source.Repository)
 	if err != nil {
 		return err
 	}
@@ -202,7 +186,7 @@ func UpdateGryphon(runtimeConfig config.Runtime, headID, version string) error {
 		return nil
 	}
 	if !gryphonInstallationComplete() {
-		return installFreshGryphon(ctx, extracted, head)
+		return installFreshGryphon(ctx, extracted)
 	}
 	return replaceGryphon(ctx, extracted, version)
 }
@@ -326,10 +310,11 @@ func extractGryphonApp(archivePath, target, version string) error {
 		return err
 	}
 	var identity struct {
-		Version string `json:"version"`
+		Version                string `json:"version"`
+		HostDependencyProtocol int    `json:"hostDependencyProtocol"`
 	}
-	if err := json.Unmarshal(packageBody, &identity); err != nil || identity.Version != version {
-		return errors.New("Gryphon package version does not match the release")
+	if err := json.Unmarshal(packageBody, &identity); err != nil || identity.Version != version || identity.HostDependencyProtocol != 1 {
+		return errors.New("Gryphon release lacks the headless host-dependency contract")
 	}
 	return nil
 }

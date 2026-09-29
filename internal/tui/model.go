@@ -102,7 +102,10 @@ func (m Model) component() console.Component {
 }
 
 func (m Model) menu() []menuItem {
-	items := []menuItem{{"Refresh status", "refresh"}}
+	items := []menuItem{{"Refresh status", "refresh"}, {"Set fallback release repository", "set-source"}}
+	if m.selected == 0 {
+		items = append(items, menuItem{"Set host Kernel machine connection", "set-kernel"})
+	}
 	if m.selected < 3 {
 		if m.component().Installed {
 			items = append(items, menuItem{"Check for updates", "check"})
@@ -130,7 +133,7 @@ func (m Model) menu() []menuItem {
 		if m.component().Installed {
 			items = append(items, menuItem{"Link registered service", "install"})
 		} else {
-			items = append(items, menuItem{"Install Wyvern from Kernel release", "install"})
+			items = append(items, menuItem{"Install Wyvern on this host", "install"})
 		}
 		if m.component().Installed {
 			items = append(items, menuItem{"Check for updates", "check"})
@@ -408,6 +411,24 @@ func (m Model) choose(action string) (tea.Model, tea.Cmd) {
 		m.notice = "A request is still pending. Open operation history to inspect accepted work."
 		return m, nil
 	}
+	if action == "set-source" {
+		m.choice = action
+		m.pending = console.Action{Component: m.component().ID, Kind: action}
+		m.clearFields()
+		m.fields = []field{newField("Fallback HTTPS repository URL", m.component().FallbackURL, false, 512)}
+		m.fields[0].input.Focus()
+		m.screen, m.cursor = form, 0
+		return m, textinput.Blink
+	}
+	if action == "set-kernel" {
+		m.choice = action
+		m.pending = console.Action{Component: "updater", Kind: action}
+		m.clearFields()
+		m.fields = []field{newField("Kernel HTTPS origin", m.snapshot.KernelURL, false, 512), newField("Protected machine token file", m.snapshot.KernelTokenFile, false, 512), newField("Host instance ID", m.snapshot.HostID, false, 64)}
+		m.fields[0].input.Focus()
+		m.screen, m.cursor = form, 0
+		return m, textinput.Blink
+	}
 	if m.component().ID == "wyvern" {
 		if wyvernManagementAction(action) {
 			return m.chooseWyvernManagement(action)
@@ -451,6 +472,11 @@ func (m Model) choose(action string) (tea.Model, tea.Cmd) {
 		if action != "install" {
 			return m, nil
 		}
+		if !m.component().Installed {
+			m.pending = console.Action{Component: "wyvern", Kind: "install"}
+			m.screen, m.cursor = confirm, 0
+			return m, nil
+		}
 	}
 	if action == "bots" {
 		m.generation++
@@ -489,6 +515,25 @@ func (m Model) choose(action string) (tea.Model, tea.Cmd) {
 		m.screen = form
 		m.cursor = 0
 		return m, textinput.Blink
+	}
+	if action == "check" {
+		m.activeJob, m.candidate = nil, nil
+		m.working, m.screen = true, result
+		m.resultLines = []string{"Checking the host component release..."}
+		m.generation++
+		generation := m.generation
+		kind := m.component().ID
+		return m, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(m.ctx, 48*time.Second)
+			defer cancel()
+			candidate, err := m.backend.Check(ctx, kind, "")
+			return replyMsg{generation: generation, kind: "check", candidate: &candidate, err: err}
+		}
+	}
+	if action == "install" && m.component().ID != "wyvern" {
+		m.pending = console.Action{Component: m.component().ID, Kind: action}
+		m.screen, m.cursor = confirm, 0
+		return m, nil
 	}
 	m.headChoices = nil
 	for _, head := range m.snapshot.Heads {
@@ -583,7 +628,7 @@ func (m Model) updateForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		for _, field := range m.fields {
-			if field.input.Value() == "" && !(m.choice == "adapter-put" && field.label == "API key (empty keeps existing key)") && !(m.choice == "client-grant" && field.label == "Allowed Adapter IDs (comma separated; empty revokes all)") {
+			if field.input.Value() == "" && !(m.choice == "adapter-put" && field.label == "API key (empty keeps existing key)") && !(m.choice == "client-grant" && field.label == "Allowed Adapter IDs (comma separated; empty revokes all)") && !(m.choice == "connect-kernel" && field.label == "Host instance ID (empty: derived from machine-id)") {
 				m.notice = "Complete the required fields before continuing."
 				return m, nil
 			}
@@ -599,6 +644,12 @@ func (m Model) updateForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.choice == "connect-bot" {
 			m.pending.Alias = m.fields[0].input.Value()
 			m.pending.BotToken = m.fields[1].input.Value()
+		}
+		if m.choice == "set-source" {
+			m.pending.RepositoryURL = m.fields[0].input.Value()
+		}
+		if m.choice == "set-kernel" {
+			m.pending.KernelURL, m.pending.KernelTokenFile, m.pending.HostID = m.fields[0].input.Value(), m.fields[1].input.Value(), m.fields[2].input.Value()
 		}
 		if wyvernManagementAction(m.choice) {
 			if err := m.readWyvernForm(); err != nil {

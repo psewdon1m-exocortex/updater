@@ -6,7 +6,6 @@ import (
 	"sort"
 	"time"
 	"updater/internal/config"
-	"updater/internal/kernel"
 	"updater/internal/model"
 	"updater/internal/state"
 )
@@ -47,14 +46,6 @@ func ReconcileHostHelpers(runtime config.Runtime, store *state.Store) {
 			release, err := store.BeginOperation("")
 			if err != nil {
 				return
-			}
-			snapshot, err := kernel.Load(head.KernelURL, head.KernelServiceToken, head.KernelCachePath, 5*time.Second)
-			if err == nil {
-				_, err = kernel.String(snapshot, "repositories."+helper+".url")
-			}
-			if err != nil {
-				release()
-				continue
 			}
 			random := make([]byte, 16)
 			if _, err = rand.Read(random); err != nil {

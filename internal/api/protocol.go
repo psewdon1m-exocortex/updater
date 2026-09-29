@@ -8,12 +8,34 @@ import (
 	"time"
 	"updater/internal/component"
 	"updater/internal/config"
+	"updater/internal/hostrelease"
 	"updater/internal/kernel"
 	"updater/internal/model"
 	"updater/internal/release"
 )
 
 func (s Server) candidate(headID, kind string) (release.Candidate, error) {
+	if kind == "updater" || kind == "neptune" || kind == "gryphon" || kind == "wyvern" {
+		current := s.Version
+		if kind != "updater" {
+			var err error
+			current, err = component.InstalledVersion(kind)
+			if err != nil {
+				return release.Candidate{}, err
+			}
+		}
+		source, err := hostrelease.Resolve(s.Runtime, kind)
+		if err != nil {
+			return release.Candidate{}, err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		result, err := release.Discover(ctx, source.Repository, kind, current)
+		result.BackupRequired = false
+		result.UpdaterVersion = s.Version
+		result.SourceOrigin, result.SourceReason = source.Origin, source.Reason
+		return result, err
+	}
 	head, err := config.LoadHead(s.Runtime, headID)
 	if err != nil {
 		return release.Candidate{}, err

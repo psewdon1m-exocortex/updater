@@ -1,6 +1,6 @@
 # Update protocol 2 — release preparation
 
-This checkout requires the signed **Updater 0.6.2** package. Publish and verify
+This checkout requires the signed **Updater 0.6.3** package. Publish and verify
 that dependency before building service releases; the bundle pin and minimum
 updater version must agree.
 

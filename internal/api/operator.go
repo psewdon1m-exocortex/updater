@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"updater/internal/component"
 	"updater/internal/config"
 	"updater/internal/console"
+	"updater/internal/kernel"
 	"updater/internal/model"
 )
 
@@ -92,39 +94,16 @@ func (s Server) operatorHandler() http.Handler {
 		if !operatorDecode(w, r, &input) {
 			return
 		}
-		if (input.Component == "gryphon" || input.Component == "wyvern") && input.HeadID != "" {
-			writeError(w, 400, errors.New("shared gateway release checks do not select a service"))
+		if input.HeadID != "" || !hostComponent(input.Component) {
+			writeError(w, 400, errors.New("host release checks require a component and no service selection"))
 			return
 		}
-		if input.Component == "gryphon" {
-			var err error
-			input.HeadID, err = s.gryphonReleaseHead()
-			if err != nil {
-				writeError(w, 503, err)
-				return
-			}
-		} else if input.Component == "wyvern" {
-			var err error
-			input.HeadID, err = s.wyvernReleaseHead()
-			if err != nil {
-				writeError(w, 503, err)
-				return
-			}
-		}
-		if _, err := s.operatorHead(input.HeadID, input.Component); err != nil {
-			writeError(w, 400, err)
-			return
-		}
-		candidate, err := s.candidate(input.HeadID, input.Component)
+		candidate, err := s.candidate("", input.Component)
 		if err != nil {
 			writeError(w, 502, errors.New("Release check failed. Verify the running component, Kernel, Volt and release configuration"))
 			return
 		}
-		shownHead := input.HeadID
-		if input.Component == "gryphon" || input.Component == "wyvern" {
-			shownHead = ""
-		}
-		writeJSON(w, 200, console.Candidate{Component: input.Component, HeadID: shownHead, Installed: candidate.InstalledVersion, Available: candidate.AvailableVersion, UpdateAvailable: candidate.UpdateAvailable})
+		writeJSON(w, 200, console.Candidate{Component: input.Component, Installed: candidate.InstalledVersion, Available: candidate.AvailableVersion, UpdateAvailable: candidate.UpdateAvailable, SourceOrigin: candidate.SourceOrigin, SourceReason: candidate.SourceReason})
 	})
 	mux.HandleFunc("POST /v1/actions", s.operatorAction)
 	return withLocalHeaders(mux)
@@ -162,6 +141,32 @@ func (s Server) operatorHead(id, kind string) (config.HeadConfig, error) {
 func (s Server) operatorSnapshot(ctx context.Context) console.Snapshot {
 	host, _ := os.Hostname()
 	result := console.Snapshot{Protocol: console.Protocol, Host: console.Text(host), ObservedAt: time.Now().UTC(), Components: console.LocalComponents(ctx, s.Version), Heads: []console.Head{}, Jobs: []console.Job{}}
+	if hostConfig, err := config.LoadHost(s.Runtime); err == nil {
+		result.KernelURL, result.KernelTokenFile, result.HostID = console.Text(hostConfig.KernelURL), console.Text(hostConfig.KernelTokenFile), console.Text(hostConfig.HostID)
+		if result.HostID == "" {
+			if id, err := config.LocalHostID(); err == nil {
+				result.HostID = id
+			}
+		}
+		result.KernelAccess = "not configured"
+		if hostConfig.KernelURL != "" && hostConfig.KernelTokenFile != "" {
+			if token, err := config.HostKernelToken(hostConfig); err != nil {
+				result.KernelAccess = "machine credential unavailable"
+			} else if _, err := kernel.LoadLive(hostConfig.KernelURL, token, filepath.Join(s.Runtime.StateDir, "register-host.json"), 2*time.Second,
+				"repositories.updater.url", "repositories.neptune.url", "repositories.gryphon.url", "repositories.wyvern.url"); err == nil {
+				result.KernelAccess = "connected"
+			} else if errors.Is(err, kernel.ErrUnavailable) {
+				result.KernelAccess = "unreachable; fallback available"
+			} else {
+				result.KernelAccess = "Register rejected or invalid"
+			}
+		}
+		for index := range result.Components {
+			result.Components[index].FallbackURL = console.Text(hostConfig.ReleaseSources[result.Components[index].ID])
+		}
+	} else {
+		result.Notice = "Cannot read Updater host release-source configuration"
+	}
 	registry, err := config.LoadRegistry(s.Runtime.RegistryPath)
 	if err != nil {
 		result.Notice = "Cannot read the registered service list; check host configuration"
@@ -271,29 +276,21 @@ func (s Server) operatorAction(w http.ResponseWriter, r *http.Request) {
 		s.operatorGryphonBot(w, action)
 		return
 	}
-	if (action.Component == "gryphon" || action.Component == "wyvern") && action.Kind == "update" {
-		if action.HeadID != "" {
-			writeError(w, 400, errors.New("shared gateway updates do not select a service"))
-			return
-		}
-		if !operatorRequestID.MatchString(action.RequestID) {
-			writeError(w, 400, errors.New("A valid operation request ID is required"))
-			return
-		}
-		if err := console.ValidateAction(action); err != nil {
-			writeError(w, 400, err)
-			return
-		}
-		var err error
-		if action.Component == "gryphon" {
-			action.HeadID, err = s.gryphonReleaseHead()
-		} else {
-			action.HeadID, err = s.wyvernReleaseHead()
-		}
-		if err != nil {
-			writeError(w, 503, err)
-			return
-		}
+	if action.Kind == "set-source" {
+		s.operatorSetSource(w, action)
+		return
+	}
+	if action.Kind == "set-kernel" {
+		s.operatorSetKernel(w, action)
+		return
+	}
+	if (action.Component == "gryphon" || action.Component == "wyvern" || action.Component == "updater") && action.Kind == "update" && action.HeadID != "" {
+		writeError(w, 400, errors.New("shared host updates cannot select an application service"))
+		return
+	}
+	if hostComponent(action.Component) && (action.Kind == "update" || action.Kind == "install") && action.HeadID == "" {
+		s.operatorHostRelease(w, r, action)
+		return
 	}
 	if action.Component == "wyvern" && action.Kind != "install" && action.Kind != "update" {
 		if !operatorRequestID.MatchString(action.RequestID) {

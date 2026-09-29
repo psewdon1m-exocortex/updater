@@ -30,6 +30,8 @@ type Candidate struct {
 	UpdaterVersion   string `json:"updater_version"`
 	Registry         string `json:"registry"`
 	Protocol         int    `json:"protocol"`
+	SourceOrigin     string `json:"source_origin,omitempty"`
+	SourceReason     string `json:"source_reason,omitempty"`
 }
 
 // Discover is metadata-only. Installation separately verifies signatures and

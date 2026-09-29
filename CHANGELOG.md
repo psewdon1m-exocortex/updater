@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.3 — pending release
+
+- Give host components their own Kernel machine connection and per-component
+  root TUI fallback sources, with live Kernel priority and no head requirement.
+- Install signed pinned Neptune and Gryphon bundles for application installers;
+  reuse healthy shared instances and require an explicit host update before a
+  consumer that pins a newer helper can install.
+- Enroll Wyvern through a host-bound machine principal without an operator
+  Access Key, preserving pending connection and client-link states.
+
 ## 0.6.2 — 2026-09-29
 
 - Preserve Wyvern's UID 10001 ownership of its bind-mounted runtime socket

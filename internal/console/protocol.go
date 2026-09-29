@@ -23,12 +23,13 @@ var botTokenPattern = regexp.MustCompile(`^[0-9]{5,}:[A-Za-z0-9_-]{20,200}$`)
 var exactVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
 
 type Component struct {
-	ID        string `json:"id"`
-	Installed bool   `json:"installed"`
-	Process   string `json:"process"`
-	Health    string `json:"health"`
-	Version   string `json:"version,omitempty"`
-	Detail    string `json:"detail"`
+	ID          string `json:"id"`
+	Installed   bool   `json:"installed"`
+	Process     string `json:"process"`
+	Health      string `json:"health"`
+	Version     string `json:"version,omitempty"`
+	Detail      string `json:"detail"`
+	FallbackURL string `json:"fallback_url,omitempty"`
 }
 
 type Head struct {
@@ -55,13 +56,17 @@ type Job struct {
 }
 
 type Snapshot struct {
-	Protocol   int         `json:"protocol"`
-	Host       string      `json:"host"`
-	ObservedAt time.Time   `json:"observed_at"`
-	Components []Component `json:"components"`
-	Heads      []Head      `json:"heads"`
-	Jobs       []Job       `json:"jobs"`
-	Notice     string      `json:"notice,omitempty"`
+	Protocol        int         `json:"protocol"`
+	Host            string      `json:"host"`
+	ObservedAt      time.Time   `json:"observed_at"`
+	Components      []Component `json:"components"`
+	Heads           []Head      `json:"heads"`
+	Jobs            []Job       `json:"jobs"`
+	Notice          string      `json:"notice,omitempty"`
+	KernelURL       string      `json:"kernel_url,omitempty"`
+	KernelTokenFile string      `json:"kernel_token_file,omitempty"`
+	HostID          string      `json:"host_id,omitempty"`
+	KernelAccess string `json:"kernel_access,omitempty"`
 }
 
 type Candidate struct {
@@ -70,19 +75,25 @@ type Candidate struct {
 	Installed       string `json:"installed"`
 	Available       string `json:"available"`
 	UpdateAvailable bool   `json:"update_available"`
+	SourceOrigin    string `json:"source_origin,omitempty"`
+	SourceReason    string `json:"source_reason,omitempty"`
 }
 
 type Action struct {
-	Component string       `json:"component"`
-	Kind      string       `json:"kind"`
-	HeadID    string       `json:"head_id"`
-	RequestID string       `json:"request_id"`
-	Version   string       `json:"version,omitempty"`
-	ExportURL string       `json:"export_url,omitempty"`
-	SetupCode string       `json:"setup_code,omitempty"`
-	Alias     string       `json:"alias,omitempty"`
-	BotToken  string       `json:"bot_token,omitempty"`
-	Wyvern    *WyvernInput `json:"wyvern,omitempty"`
+	Component       string       `json:"component"`
+	Kind            string       `json:"kind"`
+	HeadID          string       `json:"head_id"`
+	RequestID       string       `json:"request_id"`
+	Version         string       `json:"version,omitempty"`
+	ExportURL       string       `json:"export_url,omitempty"`
+	SetupCode       string       `json:"setup_code,omitempty"`
+	Alias           string       `json:"alias,omitempty"`
+	BotToken        string       `json:"bot_token,omitempty"`
+	RepositoryURL   string       `json:"repository_url,omitempty"`
+	KernelURL       string       `json:"kernel_url,omitempty"`
+	KernelTokenFile string       `json:"kernel_token_file,omitempty"`
+	HostID          string       `json:"host_id,omitempty"`
+	Wyvern          *WyvernInput `json:"wyvern,omitempty"`
 }
 
 type Bot struct {
@@ -100,8 +111,35 @@ type Backend interface {
 }
 
 func ValidateAction(a Action) error {
+	if a.Kind != "set-kernel" && (a.KernelURL != "" || a.KernelTokenFile != "" || a.HostID != "") {
+		return errors.New("Unexpected host Kernel connection fields")
+	}
+	if a.Kind == "set-kernel" {
+		u, err := url.Parse(a.KernelURL)
+		if a.Component != "updater" || a.HeadID != "" || a.Version != "" || a.RepositoryURL != "" || a.Wyvern != nil || a.ExportURL != "" || a.SetupCode != "" || a.Alias != "" || a.BotToken != "" ||
+			err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || len(a.KernelURL) > 512 ||
+			!strings.HasPrefix(a.KernelTokenFile, "/") || strings.ContainsAny(a.KernelTokenFile, "\r\n\x00") || len(a.KernelTokenFile) > 512 ||
+			!wyvernIdentifier.MatchString(a.HostID) {
+			return errors.New("Invalid host Kernel machine connection")
+		}
+		return nil
+	}
+	if a.Kind != "set-source" && a.RepositoryURL != "" {
+		return errors.New("Unexpected release source field")
+	}
+	if a.Kind == "set-source" {
+		if a.HeadID != "" || a.Version != "" || a.Wyvern != nil || a.ExportURL != "" || a.SetupCode != "" || a.Alias != "" || a.BotToken != "" ||
+			(a.Component != "updater" && a.Component != "neptune" && a.Component != "gryphon" && a.Component != "wyvern") {
+			return errors.New("Invalid host release source action")
+		}
+		u, err := url.Parse(a.RepositoryURL)
+		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || len(a.RepositoryURL) > 512 || strings.Trim(u.Path, "/") == "" {
+			return errors.New("Enter an HTTPS repository URL without credentials, query or fragment")
+		}
+		return nil
+	}
 	if a.Component == "wyvern" {
-		if (a.Kind == "install" || a.Kind == "update") && a.Wyvern == nil && a.ExportURL == "" && a.SetupCode == "" && a.Alias == "" && a.BotToken == "" && ((a.Kind == "install" && a.HeadID != "" && a.Version == "") || (a.Kind == "update" && a.HeadID == "" && exactVersionPattern.MatchString(a.Version))) {
+		if (a.Kind == "install" || a.Kind == "update") && a.Wyvern == nil && a.ExportURL == "" && a.SetupCode == "" && a.Alias == "" && a.BotToken == "" && ((a.Kind == "install" && a.Version == "") || (a.Kind == "update" && a.HeadID == "" && exactVersionPattern.MatchString(a.Version))) {
 			return nil
 		}
 		if a.Wyvern != nil {

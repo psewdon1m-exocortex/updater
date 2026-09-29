@@ -109,9 +109,7 @@ def main():
         terminal.expect("CONNECTED")
         terminal.send(b"\x1b[B\r")
         terminal.expect("Running version: 0.1.8")
-        terminal.send(b"\x1b[B\r")
-        terminal.expect("SELECT SERVICE")
-        terminal.send(b"\r")
+        terminal.send(b"\x1b[B" * 2 + b"\r")
         terminal.expect("Available: 0.1.9")
         terminal.send(b"\r")
         terminal.expect("CONFIRM / Neptune")
@@ -119,9 +117,7 @@ def main():
         terminal.expect("Running version: 0.1.8")
         checks.append("arrow navigation, release check, default cancel")
 
-        terminal.send(b"\x1b[B\r")
-        terminal.expect("SELECT SERVICE")
-        terminal.send(b"\r")
+        terminal.send(b"\x1b[B" * 2 + b"\r")
         terminal.expect("Available: 0.1.9")
         terminal.send(b"\r")
         terminal.expect("CONFIRM / Neptune")
@@ -138,7 +134,7 @@ def main():
         terminal.expect("SERVICE APPLICATIONS")
         terminal.send(b"\x1b[B\r")  # Gryphon, initially absent.
         terminal.expect("Gryphon")
-        terminal.send(b"\x1b[B" * 3 + b"\r")
+        terminal.send(b"\x1b[B" * 4 + b"\r")
         terminal.expect("Bot alias")
         terminal.send(b"test-bot\r")
         secret = b"123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcd"
@@ -179,7 +175,7 @@ def main():
         wyvern.expect("CONNECTED")
         wyvern.send(b"\x1b[B" * 3 + b"\r")
         wyvern.expect("Adapters and client bindings")
-        wyvern.send(b"\x1b[B\r")
+        wyvern.send(b"\x1b[B" * 2 + b"\r")
         wyvern.expect("CLIENT BINDINGS")
         wyvern.expect("Adapter not selected")
         wyvern.send(b"\x1b")
@@ -208,20 +204,17 @@ def main():
         connection.expect("CONNECTED")
         connection.send(b"\x1b[B" * 3 + b"\r")
         connection.expect("Connect Kernel")
-        connection.send(b"\x1b[B" * 6 + b"\r")
+        connection.send(b"\x1b[B" * 7 + b"\r")
         connection.expect("Kernel HTTPS origin")
+        connection.expect("Host instance ID")
+        assert b"Access Key" not in connection.data[connection.mark:]
         connection.send(b"https://kernel.example.test\r")
-        secret = b"wyvern-pty-secret-canary"
-        connection.send(b"\x1b[200~" + secret + b"\x1b[201~")
-        connection.read(0.2)
-        assert secret not in connection.data
         connection.send(b"\r\r")
         connection.expect("CONFIRM / Wyvern")
-        assert secret not in connection.data
         connection.send(b"\r")
         connection.expect("Create / edit Google Adapter")
         connection.finish()
-        checks.append("Wyvern Kernel enrollment form: masked input, explicit confirmation and cancellation")
+        checks.append("Wyvern Kernel enrollment form: host machine identity, no Access Key, explicit confirmation and cancellation")
     except BaseException:
         connection.abort()
         raise

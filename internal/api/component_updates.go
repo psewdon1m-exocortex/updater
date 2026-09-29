@@ -29,9 +29,9 @@ func (s Server) componentUpdates(mux *http.ServeMux) {
 			writeError(w, 400, err)
 			return
 		}
-		if err := s.authorize(r, input.HeadID); err != nil {
-			writeError(w, 401, err)
-			return
+		hostOperator := input.HeadID == "" && r.Context().Value(operatorDispatchKey{}) == true
+		if !hostOperator {
+			if err := s.authorize(r, input.HeadID); err != nil { writeError(w, 401, err); return }
 		}
 		kind := r.PathValue("component")
 		if kind != "updater" && kind != "neptune" && kind != "gryphon" && kind != "wyvern" {
@@ -42,14 +42,12 @@ func (s Server) componentUpdates(mux *http.ServeMux) {
 			writeError(w, 403, errors.New("Update the shared gateway with updater tui"))
 			return
 		}
-		head, err := config.LoadHead(s.Runtime, input.HeadID)
-		if err != nil {
-			writeError(w, 400, err)
-			return
-		}
-		if kind != "updater" && !component.ConsumesHelper(head.Service, kind) {
-			writeError(w, 403, errors.New("head does not consume the requested helper"))
-			return
+		if !hostOperator {
+			head, err := config.LoadHead(s.Runtime, input.HeadID)
+			if err != nil { writeError(w, 400, err); return }
+			if kind != "updater" && !component.ConsumesHelper(head.Service, kind) {
+				writeError(w, 403, errors.New("head does not consume the requested helper")); return
+			}
 		}
 		if len(input.RequestID) < 16 || len(input.RequestID) > 128 || !release.Stable(input.Version) {
 			writeError(w, 400, errors.New("request_id and an exact stable version are required"))

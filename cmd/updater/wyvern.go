@@ -48,12 +48,15 @@ func handleWyvern(runtime config.Runtime, args []string) {
 	case len(args) == 1 && args[0] == "connect":
 		var input struct {
 			KernelURL  string `json:"kernel_url"`
-			AccessKey  string `json:"access_key"`
 			InstanceID string `json:"instance_id"`
 		}
 		exitIf(wyvernStdin(&input))
-		err := (component.WyvernManager{}).Connect(ctx, input.KernelURL, input.AccessKey, input.InstanceID)
-		input.AccessKey = ""
+		host, err := config.LoadHost(runtime)
+		exitIf(err)
+		if input.KernelURL != host.KernelURL || input.InstanceID != host.HostID { fatal("Wyvern connection must match the host Kernel machine scope") }
+		machineToken, err := config.HostKernelToken(host)
+		exitIf(err)
+		err = (component.WyvernManager{}).Connect(ctx, input.KernelURL, machineToken, input.InstanceID)
 		exitIf(err)
 	case len(args) == 9 && args[0] == "export-link" && args[1] == "--client" && args[3] == "--service" && args[5] == "--url" && args[7] == "--output":
 		var random [16]byte

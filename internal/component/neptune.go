@@ -26,7 +26,7 @@ import (
 	"updater/internal/releaseauth"
 
 	"updater/internal/config"
-	"updater/internal/kernel"
+	"updater/internal/hostrelease"
 )
 
 const neptuneBinary = "/usr/local/lib/neptune/neptuned"
@@ -82,19 +82,11 @@ func CheckNeptune(runtimeConfig config.Runtime, headID, currentVersion string) (
 	if !neptuneVersion.MatchString(strings.TrimSuffix(currentVersion, "-dev")) && !neptuneVersion.MatchString(currentVersion) {
 		return NeptuneReleaseCheck{}, errors.New("invalid installed Neptune version")
 	}
-	head, err := config.LoadHead(runtimeConfig, headID)
+	source, err := hostrelease.Resolve(runtimeConfig, "neptune")
 	if err != nil {
 		return NeptuneReleaseCheck{}, err
 	}
-	snapshot, err := kernel.Load(head.KernelURL, head.KernelServiceToken, head.KernelCachePath, 5*time.Second)
-	if err != nil {
-		return NeptuneReleaseCheck{}, err
-	}
-	repositoryURL, err := kernel.String(snapshot, "repositories.neptune.url")
-	if err != nil {
-		return NeptuneReleaseCheck{}, err
-	}
-	owner, repository, err := githubRepository(repositoryURL)
+	owner, repository, err := githubRepository(source.Repository)
 	if err != nil {
 		return NeptuneReleaseCheck{}, err
 	}
@@ -224,19 +216,11 @@ func UpdateNeptune(runtimeConfig config.Runtime, headID, version string) error {
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 
-	head, err := config.LoadHead(runtimeConfig, headID)
+	source, err := hostrelease.Resolve(runtimeConfig, "neptune")
 	if err != nil {
 		return err
 	}
-	snapshot, err := kernel.Load(head.KernelURL, head.KernelServiceToken, head.KernelCachePath, 5*time.Second)
-	if err != nil {
-		return err
-	}
-	repositoryURL, err := kernel.String(snapshot, "repositories.neptune.url")
-	if err != nil {
-		return err
-	}
-	owner, repository, err := githubRepository(repositoryURL)
+	owner, repository, err := githubRepository(source.Repository)
 	if err != nil {
 		return err
 	}
@@ -303,7 +287,7 @@ func UpdateNeptune(runtimeConfig config.Runtime, headID, version string) error {
 		return nil
 	}
 	if !neptuneInstallationComplete() {
-		return installFreshNeptune(ctx, archivePath, staging, head)
+		return installFreshNeptune(ctx, archivePath, staging, config.HeadConfig{})
 	}
 	return replaceNeptune(ctx, filepath.Join(upgrade, "neptuned"), filepath.Join(upgrade, "neptune.service"), version)
 }
@@ -405,12 +389,20 @@ func installFreshNeptune(ctx context.Context, archivePath, staging string, head 
 	if err := os.MkdirAll("/etc/neptune", 0o750); err != nil {
 		return err
 	}
-	if err := writeSecret("/etc/neptune/kernel.token", head.KernelServiceToken, 0); err != nil {
-		return err
+	if head.KernelServiceToken != "" {
+		if err := writeSecret("/etc/neptune/kernel.token", head.KernelServiceToken, 0); err != nil {
+			return err
+		}
 	}
 	command := exec.CommandContext(ctx, "/bin/sh", filepath.Join(target, "install.sh"))
 	command.Dir = target
-	command.Env = append(os.Environ(), "NEPTUNE_KERNEL_URL="+head.KernelURL, "NEPTUNE_KERNEL_TOKEN_FILE=/etc/neptune/kernel.token")
+	command.Env = os.Environ()
+	if head.KernelURL != "" {
+		command.Env = append(command.Env, "NEPTUNE_KERNEL_URL="+head.KernelURL)
+	}
+	if head.KernelServiceToken != "" {
+		command.Env = append(command.Env, "NEPTUNE_KERNEL_TOKEN_FILE=/etc/neptune/kernel.token")
+	}
 	command.WaitDelay = 5 * time.Second
 	command.Stdout, command.Stderr = io.Discard, io.Discard
 	if err := command.Run(); err != nil {

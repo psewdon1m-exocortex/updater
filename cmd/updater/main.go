@@ -23,7 +23,7 @@ import (
 	"updater/internal/tui"
 )
 
-var version = "0.6.2"
+var version = "0.6.3"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -116,6 +116,48 @@ func main() {
 		printJSON(store.List())
 	case "version":
 		fmt.Println(version)
+	case "host":
+		if len(os.Args) == 3 && os.Args[2] == "capabilities" {
+			printJSON(map[string]any{"schema": "exocortex.updater.host-dependencies.v1", "api_version": 1,
+				"pinned_helpers": []string{"neptune", "gryphon"}, "machine_enrollment": true})
+			return
+		}
+		if len(os.Args) == 5 && os.Args[2] == "seed-source" {
+			if os.Geteuid() != 0 {
+				fatal("host configuration requires root")
+			}
+			host, err := config.LoadHost(runtime)
+			exitIf(err)
+			if host.ReleaseSources == nil {
+				host.ReleaseSources = map[string]string{}
+			}
+			if host.ReleaseSources[os.Args[3]] == "" {
+				host.ReleaseSources[os.Args[3]] = os.Args[4]
+				exitIf(config.SaveHost(runtime, host))
+			}
+			return
+		}
+		if (len(os.Args) != 7 && len(os.Args) != 8) || os.Args[2] != "configure-kernel" || os.Args[3] != "--url" || os.Args[5] != "--token-file" {
+			fatal("usage: updater host configure-kernel --url <https-origin> --token-file <absolute-path> [host-id]")
+		}
+		if os.Geteuid() != 0 {
+			fatal("host configuration requires root")
+		}
+		host, err := config.LoadHost(runtime)
+		exitIf(err)
+		id, err := config.LocalHostID()
+		exitIf(err)
+		if len(os.Args) == 8 {
+			id = os.Args[7]
+		}
+		if host.KernelURL != "" && (host.KernelURL != os.Args[4] || host.KernelTokenFile != os.Args[6] || host.HostID != id) {
+			fatal("existing host Kernel connection differs; use explicit migration")
+		}
+		host.KernelURL, host.KernelTokenFile, host.HostID = os.Args[4], os.Args[6], id
+		_, err = config.HostKernelToken(host)
+		exitIf(err)
+		exitIf(config.SaveHost(runtime, host))
+		fmt.Println("Updater host Kernel connection saved")
 	case "host-recovery-resume":
 		exitIf(hostrecovery.ResumeInterruptedHost())
 	case "host-recovery":
@@ -160,12 +202,35 @@ func main() {
 	case "wyvern":
 		handleWyvern(runtime, os.Args[2:])
 	case "gryphon":
-		if len(os.Args) != 5 || os.Args[2] != "install" || os.Args[3] != "--head" {
-			fatal("usage: updater gryphon install --head <id>")
+		if len(os.Args) == 5 && os.Args[2] == "link" && os.Args[3] == "--head" {
+			release := acquireHostOperation(runtime, "")
+			defer release()
+			if _, err := component.InstalledVersion("gryphon"); err != nil {
+				fatal("Install Gryphon before linking a service")
+			}
+			_, err := component.InitializeGryphon(runtime, os.Args[4])
+			exitIf(err)
+			fmt.Printf("Gryphon client %s is linked\n", os.Args[4])
+			return
+		}
+		if len(os.Args) == 5 && os.Args[2] == "install" && os.Args[3] == "--bundle" {
+			release := acquireHostOperation(runtime, "")
+			defer release()
+			selected, err := component.InstallPinnedHelper(runtime, "gryphon", os.Args[4])
+			exitIf(err)
+			fmt.Printf("Gryphon %s is installed\n", selected)
+			return
+		}
+		if len(os.Args) < 3 || os.Args[2] != "install" || len(os.Args) != 3 && (len(os.Args) != 5 || os.Args[3] != "--head") {
+			fatal("usage: updater gryphon install [--head <id>]")
+		}
+		headID := ""
+		if len(os.Args) == 5 {
+			headID = os.Args[4]
 		}
 		release := acquireHostOperation(runtime, "")
 		defer release()
-		selected, err := component.InitializeGryphon(runtime, os.Args[4])
+		selected, err := component.InitializeGryphon(runtime, headID)
 		exitIf(err)
 		fmt.Printf("Gryphon %s is installed\n", selected)
 	case "self-update-job":
@@ -191,13 +256,27 @@ func help() {
 	fmt.Println("  updater status")
 	fmt.Println("  updater jobs")
 	fmt.Println("  updater update [--head <id>]")
-	fmt.Println("  updater neptune install --head <id>")
+	fmt.Println("  updater host configure-kernel --url <https-origin> --token-file <absolute-path> [host-id]")
+	fmt.Println("  updater host capabilities")
+	fmt.Println("  updater host seed-source <component> <https-repository>")
+	fmt.Println("  updater neptune install [--head <id>]")
+	fmt.Println("  updater gryphon install [--head <id>]")
+	fmt.Println("  updater gryphon link --head <id>")
+	fmt.Println("  updater neptune|gryphon install --bundle <verified-directory>")
 	fmt.Println("  updater neptune enroll --head <id> --project <id> --export-url <loopback-url>")
 	fmt.Println("  updater neptune doctor")
 	fmt.Println("  updater version")
 }
 
 func handleNeptune(runtime config.Runtime, args []string) {
+	if len(args) == 3 && args[0] == "install" && args[1] == "--bundle" {
+		release := acquireHostOperation(runtime, "")
+		defer release()
+		selected, err := component.InstallPinnedHelper(runtime, "neptune", args[2])
+		exitIf(err)
+		fmt.Printf("Neptune Linux %s is installed\n", selected)
+		return
+	}
 	if len(args) == 1 && args[0] == "doctor" {
 		command := exec.Command("/usr/local/sbin/neptunectl", "doctor")
 		command.Stdout = os.Stdout
@@ -205,10 +284,14 @@ func handleNeptune(runtime config.Runtime, args []string) {
 		exitIf(command.Run())
 		return
 	}
-	if len(args) == 3 && args[0] == "install" && args[1] == "--head" {
+	if (len(args) == 1 && args[0] == "install") || (len(args) == 3 && args[0] == "install" && args[1] == "--head") {
+		headID := ""
+		if len(args) == 3 {
+			headID = args[2]
+		}
 		release := acquireHostOperation(runtime, "")
 		defer release()
-		selected, err := component.InstallLatestNeptune(runtime, args[2])
+		selected, err := component.InstallLatestNeptune(runtime, headID)
 		exitIf(err)
 		fmt.Printf("Neptune Linux %s is installed\n", selected)
 		return
@@ -226,7 +309,7 @@ func handleNeptune(runtime config.Runtime, args []string) {
 		printJSON(result)
 		return
 	}
-	fatal("usage: updater neptune install --head <id> | enroll --head <id> --project <id> --export-url <loopback-url> | doctor")
+	fatal("usage: updater neptune install [--head <id>] | enroll --head <id> --project <id> --export-url <loopback-url> | doctor")
 }
 
 func printJSON(value interface{}) {

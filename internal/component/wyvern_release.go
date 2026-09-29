@@ -3,13 +3,14 @@ package component
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"time"
 	"updater/internal/config"
-	"updater/internal/kernel"
+	"updater/internal/hostrelease"
 	"updater/internal/release"
 	"updater/internal/releaseauth"
 )
@@ -18,18 +19,11 @@ import (
 // Its typed deployment transaction preserves only runtime and unit identity;
 // it never accepts a caller-supplied backup exemption or restores Register.
 func wyvernRepository(runtime config.Runtime, headID string) (string, error) {
-	head, err := config.LoadHead(runtime, headID)
+	source, err := hostrelease.Resolve(runtime, "wyvern")
 	if err != nil {
 		return "", err
 	}
-	if !ConsumesHelper(head.Service, "wyvern") {
-		return "", errors.New("Head does not consume Wyvern")
-	}
-	snapshot, err := kernel.Load(head.KernelURL, head.KernelServiceToken, head.KernelCachePath, 5*time.Second)
-	if err != nil {
-		return "", err
-	}
-	return kernel.String(snapshot, "repositories.wyvern.url")
+	return source.Repository, nil
 }
 
 func UpdateWyvern(runtime config.Runtime, headID, version string) error {
@@ -185,10 +179,53 @@ func EnsureWyvern(runtime config.Runtime, headID, requestID string) (string, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if err := ensureWyvernHostConnection(ctx, runtime); err != nil {
+		return version, err
+	}
 	if _, err := (WyvernManager{}).EnsureClient(ctx, headID, head.Service, requestID); err != nil {
 		return version, err
 	}
 	return version, nil
+}
+
+func ensureWyvernHostConnection(ctx context.Context, runtime config.Runtime) error {
+	m := WyvernManager{}
+	host, err := config.LoadHost(runtime)
+	if err != nil {
+		return err
+	}
+	if existing, err := m.identity(); err == nil {
+		if host.KernelURL != "" && (existing.KernelURL != host.KernelURL || host.HostID != "" && existing.InstanceID != host.HostID) {
+			return errors.New("Wyvern is connected to another Kernel or host; explicit migration is required")
+		}
+		return nil
+	}
+	if _, err := os.Stat(m.identityPath()); err == nil {
+		return errors.New("Installed Wyvern identity requires explicit repair")
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if host.KernelURL == "" || host.HostID == "" {
+		return fmt.Errorf("%w: Updater host Kernel machine connection is not configured", ErrWyvernConnectionPending)
+	}
+	token, err := config.HostKernelToken(host)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: Updater machine token file is unavailable", ErrWyvernConnectionPending)
+		}
+		return err
+	}
+	return m.Connect(ctx, host.KernelURL, token, host.HostID)
+}
+
+func wyvernPending(runtime config.Runtime, reason string) {
+	if runtime.StateDir == "" {
+		return
+	}
+	if err := os.MkdirAll(runtime.StateDir, 0o700); err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(runtime.StateDir, "wyvern-connection-pending"), []byte(reason+"\n"), 0o600)
 }
 
 // InstallOrLinkWyvern keeps the first TUI installation independent of client
@@ -200,6 +237,9 @@ func InstallOrLinkWyvern(runtime config.Runtime, headID, requestID string) (stri
 		return "", err
 	}
 	if manifest != nil {
+		if headID == "" {
+			return manifest.Version, nil
+		}
 		return EnsureWyvern(runtime, headID, requestID)
 	}
 	repository, err := wyvernRepository(runtime, headID)
@@ -253,9 +293,9 @@ func BootstrapWyvern(ctx context.Context, runtime config.Runtime, headID, manife
 	if err := InstallWyvernManifest(ctx, manifest); err != nil {
 		return err
 	}
-	if _, err := m.identity(); err != nil {
-		// Cold installation is complete; the operator connects Kernel in TUI.
-		if _, statErr := os.Stat(m.identityPath()); os.IsNotExist(statErr) {
+	if err := ensureWyvernHostConnection(ctx, runtime); err != nil {
+		if errors.Is(err, ErrWyvernConnectionPending) {
+			wyvernPending(runtime, err.Error())
 			return nil
 		}
 		return err
@@ -265,5 +305,13 @@ func BootstrapWyvern(ctx context.Context, runtime config.Runtime, headID, manife
 		return err
 	}
 	_, err = m.EnsureClient(ctx, headID, head.Service, "bootstrap-"+id[:32])
-	return err
+	if err != nil {
+		if errors.Is(err, ErrWyvernConnectionPending) {
+			wyvernPending(runtime, err.Error())
+			return nil
+		}
+		return err
+	}
+	_ = os.Remove(filepath.Join(runtime.StateDir, "wyvern-connection-pending"))
+	return nil
 }

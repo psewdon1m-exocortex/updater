@@ -14,13 +14,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
 	"updater/internal/api"
 	"updater/internal/config"
-	"updater/internal/kernel"
+	"updater/internal/hostrelease"
 	"updater/internal/release"
 	"updater/internal/releaseauth"
 )
@@ -54,34 +53,9 @@ var versionPattern = regexp.MustCompile(`^updater-v([0-9]+\.[0-9]+\.[0-9]+(?:-[0
 func Run(runtime config.Runtime, headID string) error { return RunVersion(runtime, headID, "") }
 
 func RunVersion(runtime config.Runtime, headID, requestedVersion string) error {
-	if headID == "" {
-		registry, err := config.LoadRegistry(runtime.RegistryPath)
-		if err != nil {
-			return err
-		}
-		ids := make([]string, 0, len(registry.Heads))
-		for id := range registry.Heads {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-		if len(ids) == 0 {
-			return errors.New("no head service is registered")
-		}
-		headID = ids[0]
-	}
-	head, err := config.LoadHead(runtime, headID)
-	if err != nil {
-		return err
-	}
-	snapshot, err := kernel.Load(head.KernelURL, head.KernelServiceToken, head.KernelCachePath, 5*time.Second)
-	if err != nil {
-		return err
-	}
-	repositoryURL, err := kernel.String(snapshot, "repositories.updater.url")
-	if err != nil {
-		return err
-	}
-	return applyVersion(runtime, repositoryURL, head, requestedVersion)
+	source, err := hostrelease.Resolve(runtime, "updater")
+	if err != nil { return err }
+	return applyVersion(runtime, source.Repository, config.HeadConfig{}, requestedVersion)
 }
 
 func apply(runtime config.Runtime, repositoryURL string, head config.HeadConfig) error {

@@ -26,18 +26,20 @@ func TestWyvernEnrollmentAndClientReuseKeepSecretsScoped(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/auth/login":
-			var input map[string]string
-			_ = json.NewDecoder(r.Body).Decode(&input)
-			if input["access_key"] != "synthetic owner secret" {
-				t.Error("wrong Access Key")
-			}
-			http.SetCookie(w, &http.Cookie{Name: "kernel_session", Value: "synthetic-session"})
-			_ = json.NewEncoder(w).Encode(map[string]bool{"authenticated": true})
+			t.Error("Wyvern enrollment attempted operator login")
+			w.WriteHeader(http.StatusForbidden)
 		case "/api/auth/logout":
-			_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+			t.Error("Wyvern enrollment attempted operator logout")
+			w.WriteHeader(http.StatusForbidden)
 		case "/api/wyvern/instances/host/enroll":
+			if r.Header.Get("Authorization") != "Bearer synthetic machine credential" || r.Header.Get("Cookie") != "" {
+				t.Error("enrollment did not use only the Updater machine credential")
+			}
 			var input map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&input)
+			if input["host_id"] != "host" {
+				t.Error("host scope was not included")
+			}
 			if managerHash != "" && (managerHash != input["manager_token_sha256"] || runtimeHash != input["runtime_token_sha256"]) {
 				t.Error("lost reply rotated the pending identity")
 			}
@@ -77,13 +79,13 @@ func TestWyvernEnrollmentAndClientReuseKeepSecretsScoped(t *testing.T) {
 	defer server.Close()
 	m := WyvernManager{Root: t.TempDir(), Client: server.Client()}
 	ctx := context.Background()
-	if err := m.Connect(ctx, server.URL, "synthetic owner secret", "host"); err == nil {
+	if err := m.Connect(ctx, server.URL, "synthetic machine credential", "host"); err == nil {
 		t.Fatal("lost enrollment reply accepted")
 	}
-	if err := m.Connect(ctx, server.URL, "synthetic owner secret", "host"); err != nil {
+	if err := m.Connect(ctx, server.URL, "synthetic machine credential", "host"); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Connect(ctx, server.URL, "synthetic owner secret", "host"); err != nil {
+	if err := m.Connect(ctx, server.URL, "synthetic machine credential", "host"); err != nil {
 		t.Fatal("idempotent reconnect", err)
 	}
 	identity, err := m.identity()

@@ -28,7 +28,7 @@ func TestExtractGryphonAppValidatesPackageIdentity(t *testing.T) {
 	gzipWriter := gzip.NewWriter(file)
 	tarWriter := tar.NewWriter(gzipWriter)
 	entries := map[string]string{
-		"package.json":                    `{"name":"@exocortex/gryphon","version":"1.2.3"}`,
+		"package.json":                    `{"name":"@exocortex/gryphon","version":"1.2.3","hostDependencyProtocol":1}`,
 		"dist/main.js":                    "console.log('daemon')",
 		"dist/cli.js":                     "console.log('cli')",
 		"packaging/linux/gryphon.service": "[Service]\nRuntimeDirectoryPreserve=yes\n",

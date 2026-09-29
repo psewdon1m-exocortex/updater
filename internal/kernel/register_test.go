@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,22 @@ import (
 	"testing"
 	"time"
 )
+
+func TestLoadLiveDistinguishesUnavailableKernelFromRejectedCredentials(t *testing.T) {
+	status := http.StatusServiceUnavailable
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+	}))
+	defer server.Close()
+	cache := filepath.Join(t.TempDir(), "register.json")
+	if _, err := LoadLive(server.URL, "machine-token", cache, time.Second, "repositories.updater.url"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("503 must allow the host fallback: %v", err)
+	}
+	status = http.StatusUnauthorized
+	if _, err := LoadLive(server.URL, "machine-token", cache, time.Second, "repositories.updater.url"); err == nil || errors.Is(err, ErrUnavailable) {
+		t.Fatalf("401 must not allow the host fallback: %v", err)
+	}
+}
 
 func TestLoadResolvesOnlyUpdaterMetadataWithLargeRegister(t *testing.T) {
 	ref := "volt://3518462b-bb66-459a-a1ab-c38a837740ab/4"

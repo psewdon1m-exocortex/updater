@@ -19,6 +19,7 @@ import (
 )
 
 var voltReference = regexp.MustCompile(`(?i)^volt://[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/[1-5]$`)
+var ErrUnavailable = errors.New("Kernel connection unavailable")
 
 type Snapshot struct {
 	Schema   string                 `json:"schema"`
@@ -28,6 +29,16 @@ type Snapshot struct {
 }
 
 func Load(kernelURL, token, cachePath string, timeout time.Duration) (Snapshot, error) {
+	return load(kernelURL, token, cachePath, timeout, true, nil)
+}
+
+// LoadLive accepts a 304 from a reachable Kernel but never treats a cached
+// snapshot as authority when the connection fails.
+func LoadLive(kernelURL, token, cachePath string, timeout time.Duration, wanted ...string) (Snapshot, error) {
+	return load(kernelURL, token, cachePath, timeout, false, wanted)
+}
+
+func load(kernelURL, token, cachePath string, timeout time.Duration, offlineCache bool, wanted []string) (Snapshot, error) {
 	var cached Snapshot
 	cacheValid := false
 	if body, err := os.ReadFile(cachePath); err == nil && json.Unmarshal(body, &cached) == nil && verify(cached) == nil {
@@ -47,10 +58,13 @@ func Load(kernelURL, token, cachePath string, timeout time.Duration) (Snapshot, 
 		return http.ErrUseLastResponse
 	}}
 	response, remoteErr := client.Do(req)
+	if remoteErr != nil && !offlineCache {
+		return Snapshot{}, fmt.Errorf("%w: %v", ErrUnavailable, remoteErr)
+	}
 	if remoteErr == nil {
 		defer response.Body.Close()
 		if response.StatusCode == http.StatusNotModified && cacheValid {
-			return resolveSnapshot(kernelURL, token, cached, client)
+			return resolveSnapshot(kernelURL, token, cached, client, wanted)
 		}
 		if response.StatusCode == http.StatusOK {
 			body, err := io.ReadAll(io.LimitReader(response.Body, 3*1024*1024+1))
@@ -60,14 +74,17 @@ func Load(kernelURL, token, cachePath string, timeout time.Duration) (Snapshot, 
 					_ = os.MkdirAll(filepath.Dir(cachePath), 0o700)
 					_ = os.WriteFile(cachePath+".tmp", body, 0o600)
 					_ = os.Rename(cachePath+".tmp", cachePath)
-					return resolveSnapshot(kernelURL, token, snapshot, client)
+					return resolveSnapshot(kernelURL, token, snapshot, client, wanted)
 				}
 			}
 		}
 		remoteErr = fmt.Errorf("Kernel Register returned HTTP %d", response.StatusCode)
+		if !offlineCache && response.StatusCode >= 500 {
+			return Snapshot{}, fmt.Errorf("%w: %v", ErrUnavailable, remoteErr)
+		}
 	}
-	if cacheValid {
-		return resolveSnapshot(kernelURL, token, cached, client)
+	if cacheValid && offlineCache {
+		return resolveSnapshot(kernelURL, token, cached, client, wanted)
 	}
 	return Snapshot{}, fmt.Errorf("Kernel unavailable and no last-known-good Register exists: %w", remoteErr)
 }
@@ -114,14 +131,18 @@ func setDotted(values map[string]interface{}, key, value string) {
 	current[parts[len(parts)-1]] = value
 }
 
-func resolveSnapshot(kernelURL, token string, snapshot Snapshot, client *http.Client) (Snapshot, error) {
+func resolveSnapshot(kernelURL, token string, snapshot Snapshot, client *http.Client, wanted []string) (Snapshot, error) {
 	references := map[string]string{}
 	if err := collectReferences(snapshot.Values, "", references); err != nil {
 		return Snapshot{}, err
 	}
 	keys := make([]string, 0, len(references))
+	selected := map[string]bool{}
+	for _, key := range wanted {
+		selected[key] = true
+	}
 	for key := range references {
-		if updaterMetadataKey(key) {
+		if len(wanted) > 0 && selected[key] || len(wanted) == 0 && updaterMetadataKey(key) {
 			keys = append(keys, key)
 		}
 	}
@@ -138,7 +159,7 @@ func resolveSnapshot(kernelURL, token string, snapshot Snapshot, client *http.Cl
 		req.Header.Set("Content-Type", "application/json")
 		response, err := client.Do(req)
 		if err != nil {
-			return Snapshot{}, fmt.Errorf("Kernel value resolution failed: %w", err)
+			return Snapshot{}, fmt.Errorf("%w: Kernel value resolution failed: %v", ErrUnavailable, err)
 		}
 		payload, readErr := io.ReadAll(io.LimitReader(response.Body, 1024*1024+1))
 		response.Body.Close()

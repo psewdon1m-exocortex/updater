@@ -164,6 +164,10 @@ if [ "$standalone" != true ]; then
   fi
 fi
 
+# The installer knows only its own repository. Keep it as the host-owned
+# fallback until the operator configures Updater's machine connection.
+/usr/bin/updater host seed-source updater https://github.com/psewdon1m-exocortex/updater
+
 if [ "$restart_required" = true ]; then
   systemctl daemon-reload
   systemctl enable updater.service

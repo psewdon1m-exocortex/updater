@@ -122,16 +122,18 @@ report is generated after committing and is repeated by CI for the pushed SHA.
 
 | Component | Console actions |
 | --- | --- |
-| Updater | Observe process/API/version, check and confirm an exact available update. |
+| Updater | Observe process/API/version, configure its own Kernel machine connection and fallback repository, check and confirm an exact available update with zero heads. |
 | Neptune | Observe status, install, enroll a registered service with a Saturn setup code and local export URL, check and confirm updates. |
 | Gryphon | Observe status, install, list bots, connect a bot with masked token input, check and confirm updates. |
-| Wyvern | Observe runtime/configuration/drain state; install the latest qualified Kernel-listed release when absent; connect Kernel; edit Google Adapters/profiles and keys; grant/revoke clients; check/update the shared signed component without selecting a service; reload, pause/resume and inspect retained host-operation history. |
+| Wyvern | Observe runtime/configuration/drain state; install from its host release source when absent; connect Kernel with the host-bound machine credential; edit Google Adapters/profiles and keys; grant/revoke clients; check/update the shared signed component without selecting a service; reload, pause/resume and inspect retained host-operation history. |
 
-Neptune and initial Gryphon/Wyvern installations use an eligible registered
-service's release configuration. Shared Gryphon and Wyvern checks/updates use
-one host release source agreed by registered consumers and do not ask the
-operator to select a service. A fresh Wyvern install leaves client enrollment
-for a later TUI action. Accepted operations appear in retained job history.
+Updater, Neptune, Gryphon and Wyvern checks and host installations use Updater's
+own authenticated Kernel Register connection first. If it is unavailable, the
+component's saved root TUI fallback URL is used. No consumer head is needed.
+The result shows which source was selected and why a fallback was used. A fresh
+Wyvern install can leave Kernel enrollment and client links pending; installing
+a consumer later continues those steps when machine authorization is available.
+Accepted operations appear in retained job history.
 The console reconnects after daemon loss and looks up uncertain requests by
 their request ID; it does not automatically resubmit mutations. Diagnostic
 instructions remain available when the operator API is unavailable.

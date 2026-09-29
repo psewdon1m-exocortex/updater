@@ -37,7 +37,7 @@ updater process:
 ```text
 operator browser -> head web UI -> local Unix socket -> updater -> local Docker
                                       |
-                                      +-> Kernel Register (repository URL)
+                                      +-> host Kernel machine connection (host release URLs)
 ```
 
 Kernel and Perimetr may be on different VPSs and behind different SNI names.
@@ -69,10 +69,13 @@ sudo updater register-head perimetr /opt/exocortex/perimetr/.env
 
 The head environment supplies `KERNEL_URL`, `KERNEL_SERVICE_TOKEN`,
 `UPDATER_CONTROL_TOKEN`, Compose paths, the image variable and health/restore
-URLs. The repository URL is never duplicated there: Register stores its
-`volt://` reference, and updater resolves that key through Kernel before use.
-The verified cache contains references only, so a restarted updater requires
-available Kernel and Volt to obtain actual values.
+URLs. Application release discovery follows that service's scoped Register
+configuration. For Updater and the three shared host agents, release source
+belongs to the host: `/etc/exocortex/updater-host.json` holds Updater's own
+Kernel URL, host ID, protected machine-token file path, and per-component TUI
+fallback URLs. A live authenticated Kernel Register result takes priority.
+Only a transport outage or unconfigured host connection permits the fallback;
+invalid reachable data and verification failures stop the operation.
 
 `UPDATER_IMAGE_VARIABLE` and `UPDATER_VERSION_VARIABLE` identify the head's
 image and installed-version keys. Updater changes them in one atomic `.env`
@@ -176,7 +179,7 @@ for Kernel and Volt.
 
 ## CLI
 
-The built-in terminal console manages this host's Updater, Neptune and Gryphon:
+The built-in terminal console manages this host's Updater, Neptune, Gryphon and Wyvern:
 
 ```sh
 sudo updater tui
@@ -189,8 +192,11 @@ synthetic data and needs neither root nor installed services. In normal mode,
 the console connects to the separate root-only operator socket. Install the
 matching Updater binary and systemd unit before using it. Accepted jobs continue
 after the SSH session closes; reopen operation history to observe their result.
+Each component has its own editable fallback repository. The Updater section
+also configures its machine connection to Kernel using a private token-file
+reference. Checks and host installations work with zero registered heads.
 Neptune schedules remain in Saturn. Wyvern has shared runtime diagnostics,
-masked Kernel/Adapter management, client grants and signed lifecycle operations.
+Kernel/Adapter management, client grants and signed lifecycle operations.
 Its external configuration remains authoritative in Kernel/Volt; updating the
 runtime never rolls those services back.
 See [Terminal console](docs/TUI.md) for actions, trust boundaries, terminal
@@ -203,7 +209,12 @@ updater register-head <id> <env-file>
 updater status
 updater jobs
 updater update [--head <id>]
-updater neptune install --head <id>
+updater host configure-kernel --url <https-origin> --token-file <protected-file> [host-id]
+updater neptune install [--head <id>]
+updater neptune install --bundle <signed-helper-directory>
+updater gryphon install [--head <id>]
+updater gryphon install --bundle <signed-helper-directory>
+updater gryphon link --head <id>
 updater neptune enroll --head <id> --project <id> --export-url <loopback-url>
 updater neptune doctor
 updater version
@@ -228,7 +239,7 @@ The current six-service deployment, trust, recovery and acceptance contract is d
 ## Unified updates (protocol 2)
 
 See [Update protocol, saved ZIP and first migration](docs/UPDATE-PROTOCOL.md).
-The UI uses Updater **0.6.2**, an exact selected version, the standard ZIP saved
+The UI uses Updater **0.6.3**, an exact selected version, the standard ZIP saved
 on the operator PC, and durable status/progress. Helper updates use the same
 dialog without a backup. No update ZIP is retained on the application host.
 

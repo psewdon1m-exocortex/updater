@@ -46,7 +46,7 @@ func (m Model) openWyvernForm(revision int) (tea.Model, tea.Cmd) {
 	m.pending = console.Action{Component: "wyvern", Kind: m.choice, Wyvern: &console.WyvernInput{Revision: revision}}
 	switch m.choice {
 	case "connect-kernel":
-		m.fields = []field{newField("Kernel HTTPS origin", "", false, 512), newField("Kernel Access Key", "", true, 0)}
+		m.fields = []field{newField("Kernel HTTPS origin", m.snapshot.KernelURL, false, 512), newField("Host instance ID (empty: derived from machine-id)", "", false, 64)}
 	case "adapter-put":
 		m.fields = []field{newField("Adapter ID", "", false, 64), newField("Adapter name", "", false, 100), newField("Google model", "", false, 100),
 			newField("API key (empty keeps existing key)", "", true, 4096), newField("Maximum output tokens", "8192", false, 5),
@@ -81,7 +81,7 @@ func (m *Model) readWyvernForm() error {
 	v := func(index int) string { return m.fields[index].input.Value() }
 	switch m.choice {
 	case "connect-kernel":
-		i.KernelURL, i.AccessKey = v(0), v(1)
+		i.KernelURL, i.InstanceID = v(0), v(1)
 	case "adapter-put", "profile-put":
 		i.AdapterID, i.Model = v(0), v(2)
 		maxIndex, capIndex := 3, 4

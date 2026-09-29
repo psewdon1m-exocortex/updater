@@ -167,6 +167,14 @@ func (m Model) rows() []row {
 		add("")
 		heading(title(component.ID))
 		add(component.Detail)
+		if component.FallbackURL != "" {
+			add("Fallback release repository: " + component.FallbackURL)
+		} else {
+			add("Fallback release repository: not configured")
+		}
+		if component.ID == "updater" && m.snapshot.KernelURL != "" {
+			add("Host Kernel connection: " + m.snapshot.KernelURL + " (" + m.snapshot.HostID + ")")
+		}
 		if m.errorText != "" {
 			add("")
 			add(m.errorText)
@@ -180,6 +188,19 @@ func (m Model) rows() []row {
 		add("Process: " + component.Process + " | API: " + component.Health)
 		add("Running version: " + version)
 		add(component.Detail)
+		if component.FallbackURL != "" {
+			add("Fallback release repository: " + component.FallbackURL)
+		} else {
+			add("Fallback release repository: not configured")
+		}
+		if component.ID == "updater" {
+			if m.snapshot.KernelURL != "" {
+				add("Host Kernel machine connection: " + m.snapshot.KernelURL + " (" + m.snapshot.HostID + ")")
+			} else {
+				add("Host Kernel machine connection: pending")
+			}
+			if m.snapshot.KernelAccess != "" { add("Kernel access: " + m.snapshot.KernelAccess) }
+		}
 		add("")
 		if m.notice != "" {
 			add(m.notice)
@@ -209,7 +230,10 @@ func (m Model) rows() []row {
 			add("After registration, send the one-time /link command to this bot from its Telegram owner account.")
 		}
 		if m.choice == "connect-kernel" {
-			add("The Access Key is used for one enrollment and is not retained. This host receives scoped management and runtime identities.")
+			add("Uses Updater's host machine credential. Kernel grants it enrollment for this host instance.")
+		}
+		if m.choice == "set-kernel" {
+			add("Enter a protected file path for an already authorized machine credential. The token is never shown or stored in this form.")
 		}
 		if m.choice == "adapter-put" {
 			add("A new Adapter needs an API key. Existing clients keep their selected bindings. Declare only capabilities supported by the chosen model.")
@@ -323,6 +347,12 @@ func (m Model) rows() []row {
 				add("Service: " + m.candidate.HeadID)
 			}
 			add("Installed: " + m.candidate.Installed)
+			if m.candidate.SourceOrigin != "" {
+				add("Release source: " + m.candidate.SourceOrigin)
+			}
+			if m.candidate.SourceReason != "" {
+				add("Fallback reason: " + m.candidate.SourceReason)
+			}
 			if m.candidate.UpdateAvailable {
 				add("Available: " + m.candidate.Available)
 				add("Installation will independently verify signatures and checksums.")
@@ -375,10 +405,10 @@ func (m Model) rows() []row {
 			"Refresh status observes local process state and the running API version. An active unit alone does not mean that its API is healthy.",
 			"If the operator API is offline: inspect sudo systemctl status updater.service. An older daemon may need the matching Updater release and systemd unit.",
 			"For component failures: inspect sudo systemctl status " + component.ID + ".service on this host. Review configuration without copying credentials into logs.",
-			"Release checks need available Kernel/Volt metadata. Gryphon and Wyvern each use one shared host release; installation verifies its signature.",
+			"Host releases use Updater's own Kernel connection first, then this component's TUI fallback if Kernel is unavailable. Every installation verifies its signature.",
 			"Neptune: create a setup code in Saturn > Synchronization. Verify the loopback export URL for the selected service. Schedules remain in Saturn.",
 			"Gryphon: register a bot here, send its /link code once in Telegram, then select the paired bot in each service's Settings.",
-			"Wyvern: install a missing gateway from the latest qualified Kernel release, manage Adapters and client grants here, then select an allowed Adapter in each service's Settings.",
+			"Wyvern: install a missing gateway, connect it using the host machine credential, manage Adapters and client grants, then select an allowed Adapter in each service's Settings.",
 			"Operation IDs survive console/SSH loss. Reopen operation history after reconnecting. Never assume a lost response means no operation started.",
 			"After Updater self-update, the console reconnects. Relaunch updater tui to use the new UI version. Host/daemon interruption follows existing recovery rules.",
 			"Termius: use an ordinary SSH terminal with a PTY. Resize or rotate the screen freely. Special fonts and mouse support are unnecessary.",
@@ -397,6 +427,10 @@ func (m Model) rows() []row {
 
 func actionLabel(kind string) string {
 	switch kind {
+	case "set-source":
+		return "Set fallback source"
+	case "set-kernel":
+		return "Set host Kernel connection"
 	case "install":
 		return "Install helper"
 	case "enroll":

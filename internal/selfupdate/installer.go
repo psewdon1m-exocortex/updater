@@ -109,7 +109,11 @@ func prepareHost(ctx context.Context, root string, head config.HeadConfig) (func
 		}
 		return errors.Join(err, exec.Command("systemctl", "daemon-reload").Run())
 	}
-	command := exec.CommandContext(ctx, "sh", filepath.Join(root, "install.sh"), head.ID, head.EnvFile, filepath.Join(root, "updater-linux-amd64"))
+	arguments := []string{filepath.Join(root, "install.sh"), "--prepare-host", filepath.Join(root, "updater-linux-amd64")}
+	if head.ID != "" {
+		arguments = []string{filepath.Join(root, "install.sh"), head.ID, head.EnvFile, filepath.Join(root, "updater-linux-amd64")}
+	}
+	command := exec.CommandContext(ctx, "sh", arguments...)
 	command.Env = append(os.Environ(), "UPDATER_PREPARE_ONLY=true")
 	if err = command.Run(); err != nil {
 		return nil, errors.Join(errors.New("signed Updater host preparation failed"), rollback())

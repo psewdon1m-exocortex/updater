@@ -40,14 +40,13 @@ func (s Server) lifecycle(mux *http.ServeMux) {
 				writeError(w, 400, errors.New("invalid lifecycle request"))
 				return
 			}
-			if err := s.authorize(r, input.HeadID); err != nil {
-				writeError(w, 401, err)
-				return
-			}
-			head, err := config.LoadHead(s.Runtime, input.HeadID)
-			if err != nil {
-				writeError(w, 400, err)
-				return
+			hostOperator := input.HeadID == "" && r.Context().Value(operatorDispatchKey{}) == true
+			var head config.HeadConfig
+			if !hostOperator {
+				if err := s.authorize(r, input.HeadID); err != nil { writeError(w, 401, err); return }
+				var err error
+				head, err = config.LoadHead(s.Runtime, input.HeadID)
+				if err != nil { writeError(w, 400, err); return }
 			}
 			helper := "gryphon"
 			if kind == "neptune-installation" {
@@ -56,7 +55,7 @@ func (s Server) lifecycle(mux *http.ServeMux) {
 			if kind == "wyvern-installation" {
 				helper = "wyvern"
 			}
-			if kind != "updater-self-update" && !component.ConsumesHelper(head.Service, helper) {
+			if !hostOperator && kind != "updater-self-update" && !component.ConsumesHelper(head.Service, helper) {
 				writeError(w, 403, errors.New("head does not consume the requested helper"))
 				return
 			}
