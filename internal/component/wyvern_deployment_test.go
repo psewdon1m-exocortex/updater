@@ -99,8 +99,8 @@ func TestWyvernInstallAndUpdatePreservePausedState(t *testing.T) {
 				t.Fatal("maintenance marker retained")
 			}
 			unit, err := os.ReadFile(h.d.path(wyvernUnitPath))
-			if err != nil || !strings.Contains(string(unit), "--log-driver json-file --log-opt max-size=10m --log-opt max-file=3") || !strings.Contains(string(unit), "LogNamespace=wyvern") {
-				t.Fatal("installed service lacks bounded process output")
+			if err != nil || !strings.Contains(string(unit), "--log-driver json-file --log-opt max-size=10m --log-opt max-file=3") || !strings.Contains(string(unit), "LogNamespace=wyvern") || strings.Contains(string(unit), "RuntimeDirectory=") {
+				t.Fatal("installed service has unsafe socket ownership or unbounded output")
 			}
 			policy, err := os.ReadFile(h.d.path("/etc/systemd/journald@wyvern.conf.d/retention.conf"))
 			if err != nil || !strings.Contains(string(policy), "RuntimeMaxUse=16M") || !strings.Contains(string(policy), "MaxRetentionSec=30day") {

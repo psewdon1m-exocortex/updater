@@ -524,10 +524,9 @@ Requires=docker.service
 After=docker.service network-online.target
 [Service]
 Type=simple
-RuntimeDirectory=wyvern wyvern-admin
-RuntimeDirectoryPreserve=yes
-RuntimeDirectoryMode=0750
 EnvironmentFile=/etc/wyvern/wyvern.env
+# prepare-runtime creates and owns the bind-mounted socket directories as UID 10001.
+# RuntimeDirectory would reset their ownership to this root service's User=.
 ExecStartPre=/usr/bin/updater wyvern prepare-runtime
 ExecStartPre=-/usr/bin/docker rm -f exocortex-wyvern
 ExecStart=/usr/bin/docker run --rm --init --name exocortex-wyvern --label io.exocortex.managed=wyvern --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 --read-only --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 128 --memory 256m --cpus 2 --env WYVERN_BOOTSTRAP_FILE=/etc/wyvern/identity/bootstrap.json --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m --mount type=bind,source=/etc/wyvern,target=/etc/wyvern,readonly --mount type=bind,source=/run/wyvern,target=/run/wyvern --mount type=bind,source=/run/wyvern-admin,target=/run/wyvern-admin --mount type=bind,source=/var/lib/wyvern,target=/var/lib/wyvern $WYVERN_IMAGE
