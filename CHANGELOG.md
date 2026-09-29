@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.2 — 2026-09-29
+
+- Preserve Wyvern's UID 10001 ownership of its bind-mounted runtime socket
+  directories by letting `updater wyvern prepare-runtime` manage them instead
+  of systemd `RuntimeDirectory=`.
+
 ## 0.6.1 — 2026-09-28
 
 - Resolve `repositories.wyvern.url` from Kernel Register together with the
