@@ -26,10 +26,12 @@ failed, unknown or unsupported `N/A` evidence blocks publication. This is a
 normative release requirement; until the repository workflow generates and
 enforces that report, the release pipeline remains an implementation gap.
 
-`updater` is a local host tool for applying checksummed releases of Exocortex head
-services. It is deliberately not a general central deployment service. The one
-central-control bridge is deliberately narrow: the local Neptune daemon may ask
-it to install one validated Neptune Linux version queued in Saturn Synchronization.
+`updater` is a local host tool for applying verified releases of Exocortex head
+services and shared host agents. One daemon serves every registered head on the
+host. Root operators install, check and update Updater, Neptune, Gryphon and
+Wyvern through `sudo updater tui`. A narrow Neptune remote bridge still handles
+commands accepted before the service-facing update controls were removed; new
+release operations originate in the host TUI.
 
 Every VPS that hosts Kernel, Perimetr, or another supported head has its own
 updater process:
@@ -202,7 +204,8 @@ after the SSH session closes; reopen operation history to observe their result.
 Each component has its own editable fallback repository. The Updater section
 also configures its machine connection to Kernel using a private token-file
 reference. Checks and host installations work with zero registered heads.
-Neptune schedules remain in Saturn. Wyvern has shared runtime diagnostics,
+Neptune schedules are edited in each owning service's Settings; Saturn retains
+the authoritative policy revision and fleet observation. Wyvern has shared runtime diagnostics,
 Kernel/Adapter management, client grants and signed lifecycle operations.
 Its external configuration remains authoritative in Kernel/Volt; updating the
 runtime never rolls those services back.
@@ -227,6 +230,12 @@ updater neptune doctor
 updater version
 ```
 
+`gryphon link --head` provisions one registered head's scoped Gryphon client;
+the optional `--head` on the CLI `gryphon install` also provisions that client
+after host installation. Adapter registration and the owner's one-time
+`/link CODE` pairing occur only in the root TUI. Host TUI install/check/update
+operations need no head selection.
+
 `neptune install` bootstraps the host-wide daemon from the newest Linux release
 allowed by the already trusted, signed Neptune manifest when it is absent and
 uses the same rollback-safe executable and systemd-unit replacement for later upgrades. It never
@@ -235,7 +244,7 @@ reads a 15-minute single-use Saturn code from standard input, creates isolated
 local tokens, registers the project, updates its existing `.env`, and recreates
 only that service container.
 
-Installed service heads may invoke the equivalent enrollment through the authenticated local Unix socket. The API accepts only the registered head/project pair, a loopback export URL and a 32-character one-time Saturn code; it creates a durable background job and never stores the code. A missing Neptune installation is not bootstrapped from a service UI and still requires the host installer.
+Installed service heads may invoke the equivalent enrollment through the authenticated local Unix socket. The API accepts only the registered head/project pair, a loopback export URL and a 32-character one-time Saturn code; it creates a durable background job and never stores the code. On a new deployment the consuming installer ensures Neptune. If the agent is absent on an older or damaged host, repair or root TUI installation restores it before enrollment.
 
 `updater update` is operator-triggered. It downloads the checksummed updater release,
 atomically replaces the binary, restarts the systemd unit, verifies the Unix
@@ -246,9 +255,10 @@ The current six-service deployment, trust, recovery and acceptance contract is d
 ## Unified updates (protocol 2)
 
 See [Update protocol, saved ZIP and first migration](docs/UPDATE-PROTOCOL.md).
-The UI uses Updater **0.6.8**, an exact selected version, the standard ZIP saved
-on the operator PC, and durable status/progress. Helper updates use the same
-dialog without a backup. No update ZIP is retained on the application host.
+The UI uses Updater **0.6.10**, an exact selected version, the standard ZIP saved
+on the operator PC, and durable status/progress for application releases.
+Updater, Neptune, Gryphon and Wyvern release operations use the root TUI.
+No update ZIP is retained on the application host.
 
 Updater 0.6.6 reports the specific host release-check failure in the root TUI,
 retries brief GitHub release API interruptions, and applies job-history

@@ -144,6 +144,30 @@ func (s Server) Handler() http.Handler {
 		}
 		writeJSON(w, http.StatusAccepted, job)
 	})
+	mux.HandleFunc("POST /v1/components/neptune-linux/unlink", func(w http.ResponseWriter, request *http.Request) {
+		request.Body = http.MaxBytesReader(w, request.Body, 4096)
+		var payload component.NeptuneUnlinkRequest
+		decoder := json.NewDecoder(request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid Neptune unlink request: %w", err))
+			return
+		}
+		if err := s.authorize(request, payload.HeadID); err != nil {
+			writeError(w, http.StatusUnauthorized, err)
+			return
+		}
+		job, err := component.StartNeptuneUnlink(s.Runtime, s.Store, payload)
+		if err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(err.Error(), "already running") {
+				status = http.StatusConflict
+			}
+			writeError(w, status, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, job)
+	})
 	mux.HandleFunc("GET /v1/components/neptune-linux/initializations/{id}", func(w http.ResponseWriter, request *http.Request) {
 		headID := request.URL.Query().Get("head_id")
 		if err := s.authorize(request, headID); err != nil {

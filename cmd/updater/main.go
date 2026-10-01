@@ -24,7 +24,7 @@ import (
 	"updater/internal/tui"
 )
 
-var version = "0.6.9"
+var version = "0.6.10"
 var windowKeyBlob = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
 
 func main() {

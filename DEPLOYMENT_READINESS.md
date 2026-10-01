@@ -1,5 +1,12 @@
 # updater deployment and recovery contract
 
+## 0.6.10 scoped Neptune unlink
+
+Updater 0.6.10 adds the authenticated service-owned Neptune unlink lifecycle.
+It disables local schedules before disconnecting the remote binding, removes
+the scoped project state only after the disconnect succeeds, and retains the
+durable job outcome for operator review.
+
 ## 0.6.9 Window first-install source
 
 On a host with an existing Kernel connection whose Register has no
@@ -38,7 +45,7 @@ A single host daemon serves typed authenticated operations. Connected heads can 
 
 ## Trust and operator prerequisites
 
-The selected deployment profile contains Kernel, Volt, Saturn, Updater, Neptune and Gryphon. Per-host helpers are reused when healthy; attaching a service does not silently downgrade or reinstall them. Operator control is available through connected service Settings and typed CLI actions. Jobs retain their identifiers across page reloads and must reach a verified terminal result.
+The selected deployment profile contains Kernel, Volt, Saturn, Updater, Neptune and Gryphon. Per-host agents are reused when healthy; attaching a service does not silently downgrade or reinstall them. Root `sudo updater tui` owns shared-agent release checks and updates. Each service's Settings owns its own Neptune policy and scoped agent bindings. Jobs retain their identifiers across page reloads and must reach a verified terminal result.
 
 Release manifests use detached RSA-PSS-SHA256 signatures with a per-project RSA key of at least 3072 bits. Keep Updater's private key only in GitHub Secrets and expose it only to the protected release-signing job. CI derives the public counterpart and embeds it in Updater's versioned `bootstrap.sh`; bootstrap creates `/etc/exocortex/release-trust/updater.pem`, verifies the manifest before downloading binaries or packages, and never replaces an existing mismatching key automatically. No `scp`, manual release-key fingerprint or separately downloaded public key is part of this trust path. Saturn also retains its Ed25519 installer signature. The six-service profile requires Updater 0.4.5 or newer for canonical Gryphon and unified Neptune release discovery.
 

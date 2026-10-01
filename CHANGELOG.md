@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.10 — 2026-10-02
+
+- Add an authenticated, durable Neptune unlink operation that disables the
+  project policy, disconnects the remote service binding, removes local scoped
+  state and preserves an auditable terminal job result.
+- Keep shared-agent release management in the root Updater TUI while service
+  Settings own scoped enrollment, policy and unlink workflows.
+
 ## 0.6.9 — 2026-10-01
 
 - Allow Window's root-only exact-version bootstrap command to install from its

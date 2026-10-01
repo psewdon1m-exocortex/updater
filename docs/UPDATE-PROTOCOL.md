@@ -14,7 +14,9 @@ explicitly confirms that the browser download is saved. A failed or cancelled
 save never starts installation. The ZIP limit is 128 MiB; an oversized export
 fails before any release mutation.
 
-Updater, Neptune and consumed Gryphon use the same dialog without a backup step.
+Updater, Neptune, Gryphon and Wyvern have separate host release operations in
+`sudo updater tui`; a consuming service's Updates panel does not check or
+install them.
 The panel tracks durable jobs, actual state/error, and indeterminate progress when
 no measured total is available. Reload/restart reconnects by job/request ID and
 server job history. Completion triggers a fresh version check. Helpers installed

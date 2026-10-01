@@ -135,6 +135,22 @@ UPDATER_CONTROL_TOKEN=head-secret
 		t.Fatalf("unexpected invalid Neptune initialization status: %d", response.Code)
 	}
 
+	request = httptest.NewRequest(http.MethodPost, "http://updater.local/v1/components/neptune-linux/unlink",
+		strings.NewReader(`{"request_id":"unlink-unauthorized","head_id":"kernel","project_id":"kernel"}`))
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unexpected unauthenticated Neptune unlink status: %d", response.Code)
+	}
+	request = httptest.NewRequest(http.MethodPost, "http://updater.local/v1/components/neptune-linux/unlink",
+		strings.NewReader(`{"request_id":"unlink-cross-scope","head_id":"kernel","project_id":"volt"}`))
+	request.Header.Set("X-Updater-Token", "head-secret")
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("cross-service Neptune unlink was accepted: %d", response.Code)
+	}
+
 	initializationJob := model.Job{
 		ID: "neptune-1-0123456789abcdef", RequestID: "init-status", HeadID: "kernel",
 		Service: "neptune-initialization", State: "COMPLETED", CreatedAt: time.Now(), UpdatedAt: time.Now(),

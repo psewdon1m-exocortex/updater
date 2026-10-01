@@ -26,13 +26,13 @@ service-agent ownership and update-verification contracts remain authoritative.
 | 06 | Targeted API/security/UI tests, complete Go checks, build and PTY exercise; no push or release is performed. |
 | 07 | Root-only operator socket, separate from sockets mounted by service containers; typed operations and bounded bodies, no arbitrary shell commands. |
 | 08 | Not applicable: no public/indexable web surface is added. |
-| 09 | One host Updater; helper enrollment/installation/update only. Neptune schedules remain owned by Saturn. |
-| 10 | Agent states, separate bot registration, explicit mutation confirmation and durable results adapted to the terminal. |
+| 09 | One host Updater; helper enrollment/installation/update only. The owning service edits its Neptune schedule; Saturn stores the authoritative revision and shows fleet state. |
+| 10 | Agent states, separate adapter registration, explicit mutation confirmation and durable results adapted to the terminal. |
 | 11 | No deployment-topology change beyond the private local operator entry point. |
 | 12 | No release qualification is claimed. Socket isolation, stale socket handling, actual version checks and reconnect are covered at the changed boundaries. |
 
 The baseline has an existing Go CLI, service-scoped HTTP over Unix sockets,
-durable helper update jobs, Neptune initialization and Gryphon bot registration.
+durable helper update jobs, Neptune initialization and Gryphon adapter registration.
 Its working tree already contains protocol-2 work. The console adds an operator
 adapter without replacing those changes or bypassing service token checks.
 
@@ -124,8 +124,8 @@ report is generated after committing and is repeated by CI for the pushed SHA.
 | --- | --- |
 | Updater | Observe process/API/version, configure its own Kernel machine connection and fallback repository, check and confirm an exact available update with zero heads. |
 | Neptune | Observe status, install, enroll a registered service with a Saturn setup code and local export URL, check and confirm updates. |
-| Gryphon | Observe status, install, list bots, connect a bot with masked token input, check and confirm updates. |
-| Wyvern | Observe runtime/configuration/drain state; install from its host release source when absent; connect Kernel with the host-bound machine credential; edit Google Adapters/profiles and keys; grant/revoke clients; check/update the shared signed component without selecting a service; reload, pause/resume and inspect retained host-operation history. |
+| Gryphon | Observe status, install, list adapters, register an adapter with masked Telegram provider token input, issue its one-time owner `/link CODE`, check and confirm updates; no service selection for these actions. |
+| Wyvern | Observe runtime/configuration/drain state; install from its host release source when absent without a service; connect Kernel with the host-bound machine credential; edit Google Adapters/profiles and keys; grant/revoke clients; check/update the shared signed component without selecting a service; use the separate **Link registered service** action to select a consumer and provision its scoped client; reload, pause/resume and inspect retained host-operation history. |
 
 Updater, Neptune, Gryphon and Wyvern checks and host installations use Updater's
 own authenticated Kernel Register connection first. If it is unavailable, the
