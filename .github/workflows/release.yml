@@ -53,6 +53,7 @@ jobs:
           candidate_key="$(mktemp "$RUNNER_TEMP/updater-candidate.XXXXXX.pem")"
           trap 'rm -f "$candidate_key"' EXIT
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$candidate_key" 2>/dev/null
+          umask 022
           export RELEASE_SIGNING_KEY_FILE="$candidate_key"
           mkdir -p candidate-artifacts
           node scripts/sign-release.mjs --export-public-key candidate-artifacts/updater.pem

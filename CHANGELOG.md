@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.8 — 2026-10-01
+
+- Restore the package build umask after creating the temporary pre-signing
+  key; keep the failed `updater-v0.6.7` tag immutable and unpublished.
+
 ## 0.6.7 — 2026-10-01
 
 - Add Window as a separately signed, shared host diagnostic agent with root

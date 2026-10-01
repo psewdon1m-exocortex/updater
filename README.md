@@ -246,7 +246,7 @@ The current six-service deployment, trust, recovery and acceptance contract is d
 ## Unified updates (protocol 2)
 
 See [Update protocol, saved ZIP and first migration](docs/UPDATE-PROTOCOL.md).
-The UI uses Updater **0.6.7**, an exact selected version, the standard ZIP saved
+The UI uses Updater **0.6.8**, an exact selected version, the standard ZIP saved
 on the operator PC, and durable status/progress. Helper updates use the same
 dialog without a backup. No update ZIP is retained on the application host.
 
@@ -254,11 +254,11 @@ Updater 0.6.6 reports the specific host release-check failure in the root TUI,
 retries brief GitHub release API interruptions, and applies job-history
 retention to host TUI operations as well as application updates.
 
-Updater 0.6.7 adds Window as a shared, independently signed host diagnostic
+Updater 0.6.8 first publishes Window support as a shared, independently signed host diagnostic
 agent. The root TUI manages its release source, installation, pairing, timed
 read grant, emergency revocation and observed operator shell. Window has no
 application consumer dependencies in this release.
-The 0.6.7 signed install archive keeps the 0.6.6 member set so an existing
+The 0.6.8 signed install archive keeps the 0.6.6 member set so an existing
 Updater can self-update; its installer embeds the pinned Window public key.
 The release workflow runs CI and the pinned Part 12 gate before exposing its
 signing key, compares signed code with the checked candidate, verifies signed
