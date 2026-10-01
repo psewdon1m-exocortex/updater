@@ -13,14 +13,17 @@ import (
 func TestSignedInstallerExtractionRejectsTraversalLinksAndBinaryMismatch(t *testing.T) {
 	binary := []byte("synthetic signed executable")
 	hash := fmt.Sprintf("%x", sha256.Sum256(binary))
-	for _, scenario := range []string{"valid", "traversal", "symlink", "duplicate", "missing", "missing-trust", "wrong-binary"} {
+	for _, scenario := range []string{"valid", "with-window", "traversal", "symlink", "duplicate", "missing", "missing-trust", "wrong-binary"} {
 		t.Run(scenario, func(t *testing.T) {
 			dir := t.TempDir()
 			archive := filepath.Join(dir, "bundle.tgz")
 			file, _ := os.Create(archive)
 			compressed := gzip.NewWriter(file)
 			writer := tar.NewWriter(compressed)
-			members := map[string][]byte{"updater/updater-linux-amd64": binary, "updater/install.sh": []byte("#!/bin/sh\nexit 0\n"), "updater/systemd/updater.service": []byte("[Service]\n"), "updater/release-trust/updater.pem": []byte("updater trust fixture\n"), "updater/release-trust/neptune.pem": []byte("neptune trust fixture\n"), "updater/release-trust/gryphon.pem": []byte("gryphon trust fixture\n"), "updater/release-trust/wyvern.pem": []byte("wyvern trust fixture\n")}
+			members := map[string][]byte{"updater/updater-linux-amd64": binary, "updater/install.sh": []byte("#!/bin/sh\nexit 0\n"), "updater/systemd/updater.service": []byte("[Service]\n"), "updater/release-trust/updater.pem": []byte("updater trust fixture\n"), "updater/release-trust/neptune.pem": []byte("neptune trust fixture\n"), "updater/release-trust/gryphon.pem": []byte("gryphon trust fixture\n"), "updater/release-trust/wyvern.pem": []byte("wyvern trust fixture\n"), "updater/release-trust/window.pem": []byte("window trust fixture\n")}
+			if scenario != "with-window" {
+				delete(members, "updater/release-trust/window.pem")
+			}
 			if scenario == "missing" {
 				delete(members, "updater/install.sh")
 			}
@@ -50,7 +53,7 @@ func TestSignedInstallerExtractionRejectsTraversalLinksAndBinaryMismatch(t *test
 				expected = "bad"
 			}
 			root, err := extractInstallation(archive, filepath.Join(dir, "extracted"), expected)
-			if scenario == "valid" {
+			if scenario == "valid" || scenario == "with-window" {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -59,6 +62,11 @@ func TestSignedInstallerExtractionRejectsTraversalLinksAndBinaryMismatch(t *test
 				}
 				for _, service := range []string{"updater", "neptune", "gryphon", "wyvern"} {
 					if _, err = os.Stat(filepath.Join(root, "release-trust", service+".pem")); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if scenario == "with-window" {
+					if _, err = os.Stat(filepath.Join(root, "release-trust", "window.pem")); err != nil {
 						t.Fatal(err)
 					}
 				}

@@ -16,7 +16,7 @@ import (
 )
 
 func hostComponent(kind string) bool {
-	return kind == "updater" || kind == "neptune" || kind == "gryphon" || kind == "wyvern"
+	return kind == "updater" || kind == "neptune" || kind == "gryphon" || kind == "wyvern" || kind == "window"
 }
 
 func (s Server) operatorSetKernel(w http.ResponseWriter, action console.Action) {

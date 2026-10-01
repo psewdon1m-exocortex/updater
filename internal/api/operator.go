@@ -108,6 +108,8 @@ func (s Server) operatorHandler() http.Handler {
 		writeJSON(w, 200, console.Candidate{Component: input.Component, Installed: candidate.InstalledVersion, Available: candidate.AvailableVersion, UpdateAvailable: candidate.UpdateAvailable, SourceOrigin: candidate.SourceOrigin, SourceReason: candidate.SourceReason})
 	})
 	mux.HandleFunc("POST /v1/actions", s.operatorAction)
+	mux.HandleFunc("POST /v1/window/heartbeat", s.operatorWindowHeartbeat)
+	mux.HandleFunc("POST /v1/window/close", s.operatorWindowClose)
 	return withLocalHeaders(mux)
 }
 
@@ -155,7 +157,7 @@ func (s Server) operatorSnapshot(ctx context.Context) console.Snapshot {
 			if token, err := config.HostKernelToken(hostConfig); err != nil {
 				result.KernelAccess = "machine credential unavailable"
 			} else if _, err := kernel.LoadLive(hostConfig.KernelURL, token, filepath.Join(s.Runtime.StateDir, "register-host.json"), 2*time.Second,
-				"repositories.updater.url", "repositories.neptune.url", "repositories.gryphon.url", "repositories.wyvern.url"); err == nil {
+				"repositories.updater.url", "repositories.neptune.url", "repositories.gryphon.url", "repositories.wyvern.url", "repositories.window.url"); err == nil {
 				result.KernelAccess = "connected"
 			} else if errors.Is(err, kernel.ErrUnavailable) {
 				result.KernelAccess = "unreachable; fallback available"
@@ -223,7 +225,7 @@ func (s Server) operatorSnapshot(ctx context.Context) console.Snapshot {
 }
 
 func jobComponent(service string) string {
-	for _, kind := range []string{"updater", "neptune", "gryphon", "wyvern"} {
+	for _, kind := range []string{"updater", "neptune", "gryphon", "wyvern", "window"} {
 		if service == kind || strings.HasPrefix(service, kind+"-") {
 			return kind
 		}
@@ -263,7 +265,7 @@ func operatorJob(job model.Job) console.Job {
 	// Raw job.Message may contain third-party stderr. Only typed metadata and a
 	// controlled summary cross this boundary, never copied credentials or paths.
 	headID := job.HeadID
-	if job.Service == "gryphon-update" || job.Service == "wyvern-update" {
+	if job.Service == "updater-self-update" || job.Service == "gryphon-update" || job.Service == "wyvern-update" || job.Service == "window-update" {
 		headID = ""
 	}
 	return console.Job{ID: console.Text(job.ID), RequestID: console.Text(job.RequestID), HeadID: console.Text(headID), Component: jobComponent(job.Service), State: console.Text(job.State), Version: console.Text(job.Version), Summary: summary, UpdatedAt: job.UpdatedAt, Finished: job.FinishedAt != nil}
@@ -272,6 +274,10 @@ func operatorJob(job model.Job) console.Job {
 func (s Server) operatorAction(w http.ResponseWriter, r *http.Request) {
 	var action console.Action
 	if !operatorDecode(w, r, &action) {
+		return
+	}
+	if action.Component == "window" && (action.Kind == "pair" || action.Kind == "open" || action.Kind == "revoke" || action.Kind == "repair") {
+		s.operatorWindowAction(w, r, action)
 		return
 	}
 	if action.Component == "gryphon" && action.Kind == "connect-bot" {
@@ -286,7 +292,7 @@ func (s Server) operatorAction(w http.ResponseWriter, r *http.Request) {
 		s.operatorSetKernel(w, action)
 		return
 	}
-	if (action.Component == "gryphon" || action.Component == "wyvern" || action.Component == "updater") && action.Kind == "update" && action.HeadID != "" {
+	if (action.Component == "gryphon" || action.Component == "wyvern" || action.Component == "window" || action.Component == "updater") && action.Kind == "update" && action.HeadID != "" {
 		writeError(w, 400, errors.New("shared host updates cannot select an application service"))
 		return
 	}

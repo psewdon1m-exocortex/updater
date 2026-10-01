@@ -1,5 +1,18 @@
 # updater deployment and recovery contract
 
+## 0.6.7 Window trust transition
+
+Updater 0.6.6 accepts only its original seven signed installer files. The
+0.6.7 archive preserves that exact member set and embeds Window's public key
+inside its signed `install.sh`. The release workflow checks the archive against
+the 0.6.6 member limits before signing and publishing. On a representative
+host, update from 0.6.6 to 0.6.7, then confirm that
+`/etc/exocortex/release-trust/window.pem` matches the public key in the signed
+archive, the new daemon reports 0.6.7, and Window is initially uninstalled.
+Exercise a failed health activation and Updater repair before calling that host
+deployment ready. Until this host rehearsal is recorded, production deployment
+readiness is `NOT_RUN`; it is separate from the immutable release checks.
+
 This service-local record is subordinate to the coordinated
 [Part 11 deployment profile](https://github.com/psewdon1m-exocortex/general/blob/main/PART_11_INITIAL_MULTI_SERVICE_DEPLOYMENT.md)
 and the shared-agent contracts in

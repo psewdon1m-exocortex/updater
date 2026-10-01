@@ -3,8 +3,8 @@
 The own-head API advertises `mastermind.saved-copy.v2` together with components, spool and enrollment capabilities. Group updates require one exact signed release containing Core, Runtime and Worker. Both the target manifest and the protected, digest-pinned installed manifest must contain `saved_copy_protocol: 2` in their `mastermind` section. The live Core writer-barrier receipt must also report `saved_copy_protocol: 2`. A legacy Core is rejected before component stop or replacement; it needs a separately qualified compatibility migration.
 
 1. Verify and pre-pull all three immutable images before the application takes its writer barrier.
-2. The application creates its standard encrypted ZIP, offers a single-use download, deletes the transient server ZIP when the transfer ends, and keeps only the operation journal and integrity metadata.
-3. The operator confirms the saved copy and selects that exact file. The browser hashes it incrementally; the application streams it through the own-head spool API. Neither side buffers the entire archive.
+2. The application creates its standard encrypted ZIP and starts a single-use browser download from the original `Create backup and install` action. After the response transfer completes, it streams the transient server ZIP to the own-head spool and deletes the server copy. No second confirmation or file selection is required for the normal update. Browser download initiation does not prove local disk persistence.
+3. The application checks the ZIP size and SHA-256 before the spool handoff. Neither the browser nor the API buffers the entire archive. Interrupted download or spool failure blocks installation.
 4. Updater checks the sealed stream against the signed `exocortex.update-backup.v2` receipt, head, request, release, size and SHA-256 before accepting `/v2/updates`.
 5. The existing durable job ID survives reconnects. An identical lost-response retry returns the job even after transient ZIP cleanup. A different request identity or receipt cannot reuse it.
 

@@ -21,7 +21,7 @@ type Source struct {
 }
 
 func Resolve(runtime config.Runtime, component string) (Source, error) {
-	if component != "updater" && component != "neptune" && component != "gryphon" && component != "wyvern" {
+	if component != "updater" && component != "neptune" && component != "gryphon" && component != "wyvern" && component != "window" {
 		return Source{}, fmt.Errorf("unknown host component %q", component)
 	}
 	cfg, err := config.LoadHost(runtime)

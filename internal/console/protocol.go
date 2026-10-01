@@ -53,6 +53,7 @@ type Job struct {
 	PairCommand     string    `json:"pair_command,omitempty"`
 	PairExpiresAt   string    `json:"pair_expires_at,omitempty"`
 	PairBotUsername string    `json:"pair_bot_username,omitempty"`
+	WindowLeaseID   string    `json:"window_lease_id,omitempty"`
 }
 
 type Snapshot struct {
@@ -66,7 +67,7 @@ type Snapshot struct {
 	KernelURL       string      `json:"kernel_url,omitempty"`
 	KernelTokenFile string      `json:"kernel_token_file,omitempty"`
 	HostID          string      `json:"host_id,omitempty"`
-	KernelAccess string `json:"kernel_access,omitempty"`
+	KernelAccess    string      `json:"kernel_access,omitempty"`
 }
 
 type Candidate struct {
@@ -94,6 +95,8 @@ type Action struct {
 	KernelTokenFile string       `json:"kernel_token_file,omitempty"`
 	HostID          string       `json:"host_id,omitempty"`
 	Wyvern          *WyvernInput `json:"wyvern,omitempty"`
+	PublicKey       string       `json:"public_key,omitempty"`
+	Minutes         int          `json:"minutes,omitempty"`
 }
 
 type Bot struct {
@@ -111,6 +114,38 @@ type Backend interface {
 }
 
 func ValidateAction(a Action) error {
+	if a.Component == "window" && (a.Kind == "pair" || a.Kind == "open" || a.Kind == "revoke" || a.Kind == "repair") {
+		if a.HeadID != "" || a.Version != "" || a.ExportURL != "" || a.SetupCode != "" || a.Alias != "" || a.BotToken != "" || a.RepositoryURL != "" || a.KernelURL != "" || a.KernelTokenFile != "" || a.HostID != "" || a.Wyvern != nil {
+			return errors.New("Unexpected Window action fields")
+		}
+		switch a.Kind {
+		case "pair":
+			if a.Minutes != 0 || len(a.PublicKey) > 512 || !strings.HasPrefix(a.PublicKey, "ssh-ed25519 ") {
+				return errors.New("Enter one ssh-ed25519 public key")
+			}
+		case "open":
+			if a.PublicKey != "" || a.Minutes < 1 || a.Minutes > 120 {
+				return errors.New("Window duration must be 1–120 minutes")
+			}
+		case "revoke", "repair":
+			if a.PublicKey != "" || a.Minutes != 0 {
+				return errors.New("Unexpected Window action fields")
+			}
+		}
+		return nil
+	}
+	if a.Component == "window" && (a.Kind == "install" || a.Kind == "update") {
+		if a.HeadID != "" || a.PublicKey != "" || a.Minutes != 0 || a.ExportURL != "" || a.SetupCode != "" || a.Alias != "" || a.BotToken != "" || a.RepositoryURL != "" || a.KernelURL != "" || a.KernelTokenFile != "" || a.HostID != "" || a.Wyvern != nil {
+			return errors.New("Unexpected Window release fields")
+		}
+		if a.Kind == "install" && a.Version == "" || a.Kind == "update" && exactVersionPattern.MatchString(a.Version) {
+			return nil
+		}
+		return errors.New("Check an exact Window release before updating")
+	}
+	if a.PublicKey != "" || a.Minutes != 0 {
+		return errors.New("Unexpected Window action fields")
+	}
 	if a.Kind != "set-kernel" && (a.KernelURL != "" || a.KernelTokenFile != "" || a.HostID != "") {
 		return errors.New("Unexpected host Kernel connection fields")
 	}
@@ -129,7 +164,7 @@ func ValidateAction(a Action) error {
 	}
 	if a.Kind == "set-source" {
 		if a.HeadID != "" || a.Version != "" || a.Wyvern != nil || a.ExportURL != "" || a.SetupCode != "" || a.Alias != "" || a.BotToken != "" ||
-			(a.Component != "updater" && a.Component != "neptune" && a.Component != "gryphon" && a.Component != "wyvern") {
+			(a.Component != "updater" && a.Component != "neptune" && a.Component != "gryphon" && a.Component != "wyvern" && a.Component != "window") {
 			return errors.New("Invalid host release source action")
 		}
 		u, err := url.Parse(a.RepositoryURL)

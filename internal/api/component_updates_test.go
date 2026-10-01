@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,7 +14,7 @@ import (
 	"updater/internal/state"
 )
 
-func TestComponentJobSurvivesRestartAndRetriesAreScoped(t *testing.T) {
+func TestComponentJobSurvivesRestartButServiceCannotRetryHostUpdate(t *testing.T) {
 	dir := t.TempDir()
 	env := filepath.Join(dir, "kernel.env")
 	body := `KERNEL_URL=http://127.0.0.1:18180
@@ -45,7 +46,7 @@ UPDATER_CONTROL_TOKEN=synthetic-control-token
 	for _, item := range []struct {
 		token, version string
 		status         int
-	}{{"", "0.1.8", 401}, {"synthetic-control-token", "0.1.8", 200}, {"synthetic-control-token", "0.1.9", 409}} {
+	}{{"", "0.1.8", 401}, {"synthetic-control-token", "0.1.8", 403}, {"synthetic-control-token", "0.1.9", 403}} {
 		request := httptest.NewRequest(http.MethodPost, "http://updater.local/v2/components/neptune/updates", strings.NewReader(`{"head_id":"kernel","request_id":"component-request-123","version":"`+item.version+`"}`))
 		request.Header.Set("X-Updater-Token", item.token)
 		response := httptest.NewRecorder()
@@ -53,18 +54,33 @@ UPDATER_CONTROL_TOKEN=synthetic-control-token
 		if response.Code != item.status {
 			t.Fatalf("%d want %d: %s", response.Code, item.status, response.Body.String())
 		}
-		if item.status == 200 && (!strings.Contains(response.Body.String(), "COMPLETED") || strings.Contains(response.Body.String(), "backup")) {
-			t.Fatal("job status lost or backup unexpectedly required", response.Body.String())
-		}
+	}
+	status := httptest.NewRequest(http.MethodGet, "http://updater.local/v1/jobs/durable-helper-job", nil)
+	status.Header.Set("X-Updater-Token", "synthetic-control-token")
+	statusResponse := httptest.NewRecorder()
+	handler.ServeHTTP(statusResponse, status)
+	if statusResponse.Code != 200 || !strings.Contains(statusResponse.Body.String(), "COMPLETED") {
+		t.Fatal("existing job status is no longer readable", statusResponse.Code, statusResponse.Body.String())
 	}
 	if len(store.List()) != 1 {
 		t.Fatal("retry created a duplicate")
+	}
+	if err := store.Save(model.Job{ID: "host-job", RequestID: "host-request-123456", Service: "neptune-update", Version: "0.1.8", State: "COMPLETED", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	host := httptest.NewRequest(http.MethodPost, "http://updater.local/v2/components/neptune/updates",
+		strings.NewReader(`{"request_id":"host-request-123456","version":"0.1.8"}`))
+	host = host.WithContext(context.WithValue(host.Context(), operatorDispatchKey{}, true))
+	hostResponse := httptest.NewRecorder()
+	handler.ServeHTTP(hostResponse, host)
+	if hostResponse.Code != 200 || !strings.Contains(hostResponse.Body.String(), "COMPLETED") {
+		t.Fatal("root TUI dispatch cannot read its existing Neptune job", hostResponse.Code, hostResponse.Body.String())
 	}
 	request := httptest.NewRequest(http.MethodPost, "http://updater.local/v2/components/wyvern/updates", strings.NewReader(`{"head_id":"kernel","request_id":"wyvern-client-update-123","version":"0.0.2"}`))
 	request.Header.Set("X-Updater-Token", "synthetic-control-token")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != 403 || len(store.List()) != 1 {
+	if response.Code != 403 || len(store.List()) != 2 {
 		t.Fatal("consumer can update the shared gateway", response.Code)
 	}
 	labEnv := filepath.Join(dir, "laboratory.env")
@@ -95,7 +111,7 @@ UPDATER_CONTROL_TOKEN=synthetic-control-token
 			t.Fatalf("shared update authorization: %d want %d: %s", response.Code, item.status, response.Body.String())
 		}
 	}
-	if len(store.List()) != 2 {
+	if len(store.List()) != 3 {
 		t.Fatal("shared update retry created a duplicate job")
 	}
 }

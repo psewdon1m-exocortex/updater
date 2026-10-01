@@ -159,11 +159,12 @@ server-managed Nginx.
   `exocortex.gryphon.release.v1` manifest and archive checksum, atomically swap
   `/usr/local/lib/gryphon/app` together with the verified systemd unit, and
   roll back both when the client-socket health probe does not recover.
-- Neptune remote updates use a separate root-owned bridge token and Unix-socket
-  endpoint. They accept only a registered head ID plus a semantic Neptune
-  version; repository resolution, manifest/checksum verification, atomic
-  executable/unit replacement, health check, and rollback remain inside
-  Updater.
+- Neptune checks and new updates are initiated in `sudo updater tui` on the
+  host. The root-owned remote bridge remains for commands accepted before the
+  service update controls were removed; service tokens cannot start new
+  Neptune release checks or updates. Repository resolution, manifest/checksum
+  verification, atomic executable/unit replacement, health check and rollback
+  remain inside Updater.
 
 The worker retains at most 20 finished job metadata records, bounded by 30 days.
 Retention is enforced on daemon startup and every minute, including jobs
@@ -245,13 +246,23 @@ The current six-service deployment, trust, recovery and acceptance contract is d
 ## Unified updates (protocol 2)
 
 See [Update protocol, saved ZIP and first migration](docs/UPDATE-PROTOCOL.md).
-The UI uses Updater **0.6.6**, an exact selected version, the standard ZIP saved
+The UI uses Updater **0.6.7**, an exact selected version, the standard ZIP saved
 on the operator PC, and durable status/progress. Helper updates use the same
 dialog without a backup. No update ZIP is retained on the application host.
 
 Updater 0.6.6 reports the specific host release-check failure in the root TUI,
 retries brief GitHub release API interruptions, and applies job-history
 retention to host TUI operations as well as application updates.
+
+Updater 0.6.7 adds Window as a shared, independently signed host diagnostic
+agent. The root TUI manages its release source, installation, pairing, timed
+read grant, emergency revocation and observed operator shell. Window has no
+application consumer dependencies in this release.
+The 0.6.7 signed install archive keeps the 0.6.6 member set so an existing
+Updater can self-update; its installer embeds the pinned Window public key.
+The release workflow runs CI and the pinned Part 12 gate before exposing its
+signing key, compares signed code with the checked candidate, verifies signed
+assets, and checks anonymous downloads before attaching the final report.
 
 Updater 0.6.5 prepares and permits Wyvern's dedicated journald policy directory
 inside the daemon sandbox. A failed Wyvern activation can then restore the

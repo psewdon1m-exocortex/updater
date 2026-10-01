@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,9 +30,10 @@ const (
 	bots
 )
 
-var componentNames = []string{"updater", "neptune", "gryphon", "wyvern"}
+var componentNames = []string{"updater", "neptune", "gryphon", "wyvern", "window"}
 
 type pollMsg struct{}
+type observedMsg struct{ err error }
 type snapshotMsg struct {
 	snapshot console.Snapshot
 	err      error
@@ -103,6 +106,16 @@ func (m Model) component() console.Component {
 
 func (m Model) menu() []menuItem {
 	items := []menuItem{{"Refresh status", "refresh"}, {"Set fallback release repository", "set-source"}}
+	if m.component().ID == "window" {
+		items = append(items, menuItem{"Check for releases", "check"})
+		if m.component().Installed {
+			items = append(items, menuItem{"Pair development PC public key", "pair"}, menuItem{"Open read-only grant", "open"}, menuItem{"Revoke access now", "revoke"}, menuItem{"Start observed operator shell", "observe"}, menuItem{"Repair Window runtime", "repair"})
+		} else {
+			items = append(items, menuItem{"Install Window on this host", "install"})
+		}
+		items = append(items, menuItem{"Operation history", "jobs"})
+		return append(items, menuItem{"Help / diagnostics", "help"}, menuItem{"Back to applications", "back"})
+	}
 	if m.selected == 0 {
 		items = append(items, menuItem{"Set host Kernel machine connection", "set-kernel"})
 	}
@@ -145,6 +158,13 @@ func (m Model) menu() []menuItem {
 
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
+	case observedMsg:
+		m.screen = details
+		m.notice = "Observed shell closed."
+		if msg.err != nil {
+			m.notice = "Observed shell: " + console.Text(msg.err.Error())
+		}
+		return m, m.refresh()
 	case tea.WindowSizeMsg:
 		m.width = max(1, msg.Width)
 		m.height = max(1, msg.Height)
@@ -279,7 +299,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.selected = max(0, m.selected-1)
 			}
 			if key == "down" {
-				m.selected = min(3, m.selected+1)
+				m.selected = min(len(componentNames)-1, m.selected+1)
 			}
 			if key == "enter" || key == "right" {
 				m.screen = details
@@ -411,6 +431,29 @@ func (m Model) choose(action string) (tea.Model, tea.Cmd) {
 		m.notice = "A request is still pending. Open operation history to inspect accepted work."
 		return m, nil
 	}
+	if m.component().ID == "window" {
+		switch action {
+		case "observe":
+			return m, tea.ExecProcess(exec.Command("/usr/local/bin/window", "observe"), func(err error) tea.Msg { return observedMsg{err: err} })
+		case "pair", "open":
+			m.choice = action
+			m.pending = console.Action{Component: "window", Kind: action}
+			m.clearFields()
+			if action == "pair" {
+				m.fields = []field{newField("Development PC ssh-ed25519 public key", "", false, 512)}
+			}
+			if action == "open" {
+				m.fields = []field{newField("Duration in minutes (1–120)", "20", false, 3)}
+			}
+			m.fields[0].input.Focus()
+			m.screen, m.cursor = form, 0
+			return m, textinput.Blink
+		case "revoke", "repair":
+			m.pending = console.Action{Component: "window", Kind: action}
+			m.screen, m.cursor = confirm, 0
+			return m, nil
+		}
+	}
 	if action == "set-source" {
 		m.choice = action
 		m.pending = console.Action{Component: m.component().ID, Kind: action}
@@ -494,16 +537,16 @@ func (m Model) choose(action string) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.choice = action
-	if m.component().ID == "gryphon" && action == "check" {
+	if (m.component().ID == "gryphon" || m.component().ID == "window") && action == "check" {
 		m.activeJob, m.candidate = nil, nil
 		m.working, m.screen = true, result
-		m.resultLines = []string{"Checking the shared Gryphon release..."}
+		m.resultLines = []string{"Checking the shared " + console.Text(m.component().ID) + " release..."}
 		m.generation++
 		generation := m.generation
 		return m, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(m.ctx, 48*time.Second)
 			defer cancel()
-			candidate, err := m.backend.Check(ctx, "gryphon", "")
+			candidate, err := m.backend.Check(ctx, m.component().ID, "")
 			return replyMsg{generation: generation, kind: "check", candidate: &candidate, err: err}
 		}
 	}
@@ -651,6 +694,17 @@ func (m Model) updateForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.choice == "set-kernel" {
 			m.pending.KernelURL, m.pending.KernelTokenFile, m.pending.HostID = m.fields[0].input.Value(), m.fields[1].input.Value(), m.fields[2].input.Value()
 		}
+		if m.choice == "pair" {
+			m.pending.PublicKey = m.fields[0].input.Value()
+		}
+		if m.choice == "open" {
+			minutes, err := strconv.Atoi(m.fields[0].input.Value())
+			if err != nil {
+				m.notice = "Enter a duration in minutes."
+				return m, nil
+			}
+			m.pending.Minutes = minutes
+		}
 		if wyvernManagementAction(m.choice) {
 			if err := m.readWyvernForm(); err != nil {
 				m.notice = err.Error()
@@ -743,6 +797,7 @@ func NewDemo() *Demo {
 		{ID: "neptune", Installed: true, Process: "active", Health: "ready", Version: "0.1.8", Detail: "Backup agent is responding. Schedules are managed in Saturn."},
 		{ID: "gryphon", Process: "inactive", Health: "not installed", Detail: "Install the Telegram gateway to connect a bot."},
 		{ID: "wyvern", Installed: true, Process: "active", Health: "ready", Version: "0.0.1", Detail: "LLM gateway is responding. Review Adapters and client bindings."},
+		{ID: "window", Installed: true, Process: "active", Health: "ready", Version: "0.0.1", Detail: "DEMO: paired development PC; read-only grant closed."},
 	}, Heads: []console.Head{{ID: "kernel", Service: "kernel", Helpers: []string{"neptune"}, ExportURL: "http://127.0.0.1:18180/api/internal/neptune/backup"}, {ID: "saturn", Service: "saturn", Helpers: []string{"neptune", "gryphon"}, ExportURL: "http://127.0.0.1:3000/api/v1/internal/neptune/backup"}}, Jobs: []console.Job{{ID: "demo-previous-job", Component: "neptune", HeadID: "kernel", State: "COMPLETED", Version: "0.1.8", Summary: "Operation completed and verified", UpdatedAt: now, Finished: true}}}}
 }
 func (d *Demo) Snapshot(context.Context) (console.Snapshot, error) {
@@ -769,6 +824,9 @@ func (d *Demo) Check(_ context.Context, kind, head string) (console.Candidate, e
 	}
 	if kind == "gryphon" {
 		available = "0.1.5"
+	}
+	if kind == "window" {
+		available = "0.0.2"
 	}
 	return console.Candidate{Component: kind, HeadID: head, Installed: current, Available: available, UpdateAvailable: current != available}, nil
 }

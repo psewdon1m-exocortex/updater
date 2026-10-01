@@ -199,7 +199,9 @@ func (m Model) rows() []row {
 			} else {
 				add("Host Kernel machine connection: pending")
 			}
-			if m.snapshot.KernelAccess != "" { add("Kernel access: " + m.snapshot.KernelAccess) }
+			if m.snapshot.KernelAccess != "" {
+				add("Kernel access: " + m.snapshot.KernelAccess)
+			}
 		}
 		add("")
 		if m.notice != "" {
@@ -218,7 +220,9 @@ func (m Model) rows() []row {
 		}
 	case form:
 		heading(title(component.ID) + " / " + actionLabel(m.pending.Kind))
-		if m.pending.Component == "wyvern" || m.pending.Component == "gryphon" && (m.pending.Kind == "update" || m.pending.Kind == "connect-bot") {
+		if m.pending.Component == "window" {
+			add("Scope: paired development PC; all Window diagnostic sources")
+		} else if m.pending.Component == "wyvern" || m.pending.Component == "gryphon" && (m.pending.Kind == "update" || m.pending.Kind == "connect-bot") {
 			add("Scope: all clients of the local " + title(m.pending.Component) + " instance")
 		} else {
 			add("Service: " + m.pending.HeadID)
@@ -254,7 +258,9 @@ func (m Model) rows() []row {
 	case confirm:
 		heading("CONFIRM / " + title(m.pending.Component))
 		add("Action: " + actionLabel(m.pending.Kind))
-		if m.pending.Component == "wyvern" {
+		if m.pending.Component == "window" {
+			add("Scope: paired development PC; all Window diagnostic sources")
+		} else if m.pending.Component == "wyvern" {
 			add("Scope: all clients of the local Wyvern instance")
 		} else {
 			add("Service: " + m.pending.HeadID)
@@ -400,6 +406,19 @@ func (m Model) rows() []row {
 		}
 	case help:
 		heading("HELP / " + title(component.ID))
+		if component.ID == "window" {
+			for _, line := range []string{
+				"Pair: paste the development PC's ssh-ed25519 public key once. Window grants all registered diagnostic sources together.",
+				"Open: choose 1–120 minutes. This TUI renews the grant; closing its SSH session stops access within 12 seconds.",
+				"Codex opens a separate SSH connection as window@host using the paired key and the forced MCP command. It never runs on this host.",
+				"Revoke access now closes the grant immediately. Start observed operator shell to share echoed commands and output; Codex cannot enter input.",
+				"In the observed shell: sudo window capture-test smoke -- COMMAND [ARG...] saves a bounded test result for the agent.",
+				"Use the development PC's own SSH host-key verification. Never disable StrictHostKeyChecking.",
+			} {
+				add(line)
+				add("")
+			}
+		}
 		for _, line := range []string{
 			"Use Up/Down and Enter. Esc returns; Ctrl+C exits. Tab moves between form fields.",
 			"Refresh status observes local process state and the running API version. An active unit alone does not mean that its API is healthy.",

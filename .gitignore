@@ -9,5 +9,7 @@ release-artifacts/
 *.deb
 *.log
 *.pem
+!release-trust/window.pem
 *.key
 *.crt
+__pycache__/

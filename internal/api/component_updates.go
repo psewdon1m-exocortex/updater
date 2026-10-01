@@ -31,22 +31,29 @@ func (s Server) componentUpdates(mux *http.ServeMux) {
 		}
 		hostOperator := input.HeadID == "" && r.Context().Value(operatorDispatchKey{}) == true
 		if !hostOperator {
-			if err := s.authorize(r, input.HeadID); err != nil { writeError(w, 401, err); return }
+			if err := s.authorize(r, input.HeadID); err != nil {
+				writeError(w, 401, err)
+				return
+			}
 		}
 		kind := r.PathValue("component")
-		if kind != "updater" && kind != "neptune" && kind != "gryphon" && kind != "wyvern" {
+		if kind != "updater" && kind != "neptune" && kind != "gryphon" && kind != "wyvern" && kind != "window" {
 			writeError(w, 400, errors.New("unknown component"))
 			return
 		}
-		if (kind == "gryphon" || kind == "wyvern") && r.Context().Value(operatorDispatchKey{}) != true {
-			writeError(w, 403, errors.New("Update the shared gateway with updater tui"))
+		if (kind == "updater" || kind == "neptune" || kind == "gryphon" || kind == "wyvern" || kind == "window") && !hostOperator {
+			writeError(w, 403, errors.New("Update shared host components with sudo updater tui"))
 			return
 		}
 		if !hostOperator {
 			head, err := config.LoadHead(s.Runtime, input.HeadID)
-			if err != nil { writeError(w, 400, err); return }
-			if kind != "updater" && !component.ConsumesHelper(head.Service, kind) {
-				writeError(w, 403, errors.New("head does not consume the requested helper")); return
+			if err != nil {
+				writeError(w, 400, err)
+				return
+			}
+			if !component.ConsumesHelper(head.Service, kind) {
+				writeError(w, 403, errors.New("head does not consume the requested helper"))
+				return
 			}
 		}
 		if len(input.RequestID) < 16 || len(input.RequestID) > 128 || !release.Stable(input.Version) {
@@ -125,6 +132,8 @@ func (s Server) runComponentUpdate(job model.Job, kind string) {
 		err = component.UpdateNeptune(s.Runtime, job.HeadID, job.Version)
 	} else if kind == "wyvern" {
 		err = component.UpdateWyvern(s.Runtime, job.HeadID, job.Version)
+	} else if kind == "window" {
+		err = component.UpdateWindow(s.Runtime, job.Version, s.Version)
 	} else {
 		err = component.UpdateGryphon(s.Runtime, job.HeadID, job.Version)
 	}
@@ -154,6 +163,11 @@ func (s Server) runComponentUpdate(job model.Job, kind string) {
 			if outcome.RollbackFailed {
 				job.State = "ROLLBACK_FAILED"
 			}
+		}
+		var windowOutcome component.WindowDeploymentError
+		if errors.As(err, &windowOutcome) {
+			if windowOutcome.RolledBack { job.State = "ROLLED_BACK" }
+			if windowOutcome.RollbackFailed { job.State = "ROLLBACK_FAILED" }
 		}
 		job.Message = err.Error()
 	} else {

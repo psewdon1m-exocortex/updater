@@ -3,91 +3,220 @@ name: Release Updater
 on:
   push:
     tags:
-      - "updater-v*"
+      - 'updater-v*'
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
 
 jobs:
   quality-gate:
+    uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
-    uses: ./.github/workflows/ci.yml
 
-  release:
+  pre-signing:
+    name: Pre-signing release gate
     needs: quality-gate
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: psewdon1m-exocortex/general
+          ref: 65b2f5461a4499243024f4125fb7d4db3df89ad6
+          path: .central-docs
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.24.x"
+          go-version: '1.24.x'
           cache: true
-      # Updater 0.1.x verifies detached Sigstore bundles before it can
-      # self-update. Keep publishing them so old production hosts have a
-      # cryptographically verified upgrade path to the current updater.
-      - uses: sigstore/cosign-installer@v3.10.1
-      - name: Resolve version
-        id: release
+      - name: Require exact tag at current main and no existing release
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME#updater-v}"
-          [[ "$GITHUB_REF_NAME" == "updater-v${version}" ]]
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - name: Test
+          [[ "$GITHUB_REF_NAME" =~ ^updater-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$GITHUB_REF_NAME" != updater-v0.0.0 ]]
+          [[ "$(git ls-remote origin refs/heads/main | cut -f1)" == "$GITHUB_SHA" ]]
+          status="$(curl -sS -L -o /dev/null -w '%{http_code}' --retry 3 \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME")"
+          [[ "$status" == 404 ]] || { echo "Release exists or GitHub returned HTTP $status" >&2; exit 1; }
+      - name: Build a reproducible candidate without the production signer
+        env:
+          WYVERN_RELEASE_PUBLIC_KEY: ${{ vars.WYVERN_RELEASE_PUBLIC_KEY }}
+        shell: bash
         run: |
-          sh -n bootstrap.sh install.sh scripts/recover-0.5.1-to-0.6.0.sh
-          go test ./...
+          [[ -n "$WYVERN_RELEASE_PUBLIC_KEY" ]] || { echo 'Pinned Wyvern release key is missing' >&2; exit 1; }
+          umask 077
+          candidate_key="$(mktemp "$RUNNER_TEMP/updater-candidate.XXXXXX.pem")"
+          trap 'rm -f "$candidate_key"' EXIT
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$candidate_key" 2>/dev/null
+          export RELEASE_SIGNING_KEY_FILE="$candidate_key"
+          mkdir -p candidate-artifacts
+          node scripts/sign-release.mjs --export-public-key candidate-artifacts/updater.pem
+          printf '%s\n' "$WYVERN_RELEASE_PUBLIC_KEY" > "$RUNNER_TEMP/wyvern.pem"
+          openssl pkey -pubin -in "$RUNNER_TEMP/wyvern.pem" -noout
+          export WYVERN_RELEASE_PUBLIC_KEY_FILE="$RUNNER_TEMP/wyvern.pem"
+          bash scripts/build-release.sh "${GITHUB_REF_NAME#updater-v}" candidate-artifacts
+          python3 scripts/test-legacy-installer.py \
+            "candidate-artifacts/updater-${GITHUB_REF_NAME#updater-v}-install.tar.gz" \
+            release-trust/window.pem
+      - name: Evaluate every Part 12 ID before signing credentials
+        shell: bash
+        run: |
+          main_sha="$(git ls-remote origin refs/heads/main | cut -f1)"
+          python3 scripts/known-problems-gate.py pre --docs .central-docs \
+            --main-revision "$main_sha" --artifacts candidate-artifacts \
+            --candidate candidate.json --report pre-release-gate.json
+      - name: Preserve candidate evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: updater-candidate-${{ github.sha }}
+          path: |
+            candidate.json
+            pre-release-gate.json
+          if-no-files-found: error
+          retention-days: 90
 
-      - name: Build release artifacts
+  release:
+    name: Sign, verify and publish
+    needs: pre-signing
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: psewdon1m-exocortex/general
+          ref: 65b2f5461a4499243024f4125fb7d4db3df89ad6
+          path: .central-docs
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.24.x'
+          cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-candidate-${{ github.sha }}
+      - uses: sigstore/cosign-installer@v3.10.1
+      - name: Recheck main and native entry points
+        shell: bash
+        run: |
+          [[ "$(git ls-remote origin refs/heads/main | cut -f1)" == "$GITHUB_SHA" ]]
+          sh -n bootstrap.sh install.sh
+          bash -n scripts/build-release.sh
+      - name: Build exact release artifacts
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
           WYVERN_RELEASE_PUBLIC_KEY: ${{ vars.WYVERN_RELEASE_PUBLIC_KEY }}
         shell: bash
         run: |
-          test -n "$WYVERN_RELEASE_PUBLIC_KEY"
+          [[ -n "$RELEASE_SIGNING_KEY" && -n "$WYVERN_RELEASE_PUBLIC_KEY" ]] || {
+            echo 'Protected Updater signer or pinned Wyvern key is missing' >&2; exit 1;
+          }
           printf '%s\n' "$WYVERN_RELEASE_PUBLIC_KEY" > "$RUNNER_TEMP/wyvern.pem"
-          openssl rsa -pubin -in "$RUNNER_TEMP/wyvern.pem" -noout
+          openssl pkey -pubin -in "$RUNNER_TEMP/wyvern.pem" -noout
           export WYVERN_RELEASE_PUBLIC_KEY_FILE="$RUNNER_TEMP/wyvern.pem"
           node scripts/sign-release.mjs --export-public-key release-artifacts/updater.pem
-          bash scripts/build-release.sh "${{ steps.release.outputs.version }}"
-
-      - name: Sign trusted release manifest
+          bash scripts/build-release.sh "${GITHUB_REF_NAME#updater-v}"
+          python3 scripts/test-legacy-installer.py \
+            "release-artifacts/updater-${GITHUB_REF_NAME#updater-v}-install.tar.gz" \
+            release-trust/window.pem
+      - name: Sign manifest and generate exact bootstrap
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         shell: bash
         run: |
           node scripts/sign-release.mjs release-artifacts/updater-release.json
-          node scripts/build-bootstrap.mjs bootstrap.sh release-artifacts/updater.pem release-artifacts/bootstrap.sh "${{ steps.release.outputs.version }}"
+          node scripts/build-bootstrap.mjs bootstrap.sh release-artifacts/updater.pem \
+            release-artifacts/bootstrap.sh "${GITHUB_REF_NAME#updater-v}"
           sh -n release-artifacts/bootstrap.sh
-          if grep -q '__UPDATER_BOOTSTRAP_' release-artifacts/bootstrap.sh; then exit 1; fi
+      - name: Verify signature and candidate byte identity
+        run: >-
+          python3 scripts/known-problems-gate.py verify --docs .central-docs
+          --artifacts release-artifacts --candidate candidate.json
+          --pre-report pre-release-gate.json
       - name: Sign backward-compatible release artifacts
         shell: bash
         run: |
           find release-artifacts -maxdepth 1 -type f ! -name '*.sigstore.json' -print0 |
-            while IFS= read -r -d '' artifact; do
-              cosign sign-blob --yes --bundle "${artifact}.sigstore.json" "$artifact"
+            while IFS= read -r -d '' asset; do
+              cosign sign-blob --yes --bundle "${asset}.sigstore.json" "$asset"
             done
-
           cosign verify-blob \
             --bundle release-artifacts/updater-release.json.sigstore.json \
             --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}" \
-            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
             release-artifacts/updater-release.json
-
       - uses: actions/attest-build-provenance@v3
         with:
-          subject-path: "release-artifacts/*"
-
-      - name: Publish GitHub release
+          subject-path: 'release-artifacts/*'
+      - name: Create draft release with verified assets
+        id: create_draft
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          [[ "$(git ls-remote origin refs/heads/main | cut -f1)" == "$GITHUB_SHA" ]]
           gh release create "$GITHUB_REF_NAME" release-artifacts/* \
-            --verify-tag --latest=false --generate-notes \
-            --title "Updater ${{ steps.release.outputs.version }}"
+            --verify-tag --draft --latest=false --generate-notes \
+            --title "Updater ${GITHUB_REF_NAME#updater-v}"
+      - name: Compare draft downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/draft-assets"
+          gh release download "$GITHUB_REF_NAME" --dir "$RUNNER_TEMP/draft-assets"
+          for asset in release-artifacts/*; do
+            cmp "$asset" "$RUNNER_TEMP/draft-assets/${asset##*/}"
+          done
+      - name: Publish immutable nonlatest version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest=false
+      - name: Anonymous release download smoke
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/public-assets"
+          for asset in release-artifacts/*; do
+            name="${asset##*/}"
+            curl -fLSs --proto '=https' --proto-redir '=https' \
+              --retry 5 --retry-all-errors --connect-timeout 10 --max-time 180 \
+              "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$name" \
+              -o "$RUNNER_TEMP/public-assets/$name"
+          done
+      - name: Complete Part 12 against public release bytes
+        shell: bash
+        run: >-
+          python3 scripts/known-problems-gate.py final --docs .central-docs
+          --artifacts release-artifacts --candidate candidate.json
+          --pre-report pre-release-gate.json
+          --public "$RUNNER_TEMP/public-assets"
+          --report known-problems-report.json
+      - name: Attach and verify final release evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release upload "$GITHUB_REF_NAME" known-problems-report.json
+          curl -fLSs --proto '=https' --proto-redir '=https' --retry 5 --retry-all-errors \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/known-problems-report.json" \
+            -o "$RUNNER_TEMP/public-report.json"
+          cmp known-problems-report.json "$RUNNER_TEMP/public-report.json"
+      - name: Retract incomplete release
+        if: ${{ failure() && steps.create_draft.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=true --latest=false

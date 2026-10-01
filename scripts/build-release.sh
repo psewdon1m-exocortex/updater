@@ -19,6 +19,10 @@ public_key="${RELEASE_PUBLIC_KEY_FILE:-$root/$output/updater.pem}"
 }
 wyvern_public="${WYVERN_RELEASE_PUBLIC_KEY_FILE:-$root/release-trust/wyvern.pem}"
 [[ -f "$wyvern_public" ]] || { echo "Provide the pinned Wyvern public release key" >&2; exit 3; }
+window_public="${WINDOW_RELEASE_PUBLIC_KEY_FILE:-$root/release-trust/window.pem}"
+[[ -f "$window_public" ]] || { echo "Provide the pinned Window public release key" >&2; exit 3; }
+window_public_b64="$(base64 -w0 "$window_public")"
+[[ "$window_public_b64" =~ ^[A-Za-z0-9+/=]+$ ]] || { echo "Invalid Window public release key encoding" >&2; exit 3; }
 for helper in neptune gryphon; do
   [[ -f "$root/release-trust/$helper.pem" ]] || {
     echo "Pinned $helper release public key is missing" >&2
@@ -44,11 +48,12 @@ stage="$(mktemp -d)"
 trap 'rm -rf "$debroot" "$stage"' EXIT
 mkdir -p "$debroot/DEBIAN" "$debroot/usr/bin" "$debroot/lib/systemd/system"
 mkdir -p "$debroot/usr/share/exocortex-updater/systemd" "$debroot/usr/share/exocortex-updater/release-trust"
-cp "$root/install.sh" "$debroot/usr/share/exocortex-updater/install.sh"
+sed "s|__WINDOW_PUBLIC_KEY_BASE64__|$window_public_b64|" "$root/install.sh" > "$debroot/usr/share/exocortex-updater/install.sh"
 cp "$root/systemd/updater.service" "$debroot/usr/share/exocortex-updater/systemd/"
 cp "$public_key" "$debroot/usr/share/exocortex-updater/release-trust/updater.pem"
 cp "$root/release-trust/neptune.pem" "$root/release-trust/gryphon.pem" "$debroot/usr/share/exocortex-updater/release-trust/"
 cp "$wyvern_public" "$debroot/usr/share/exocortex-updater/release-trust/wyvern.pem"
+cp "$window_public" "$debroot/usr/share/exocortex-updater/release-trust/window.pem"
 sed "s/^Version: .*/Version: $version/" \
   "$root/packaging/control" > "$debroot/DEBIAN/control"
 cp "$root/packaging/postinst" "$debroot/DEBIAN/postinst"
@@ -64,7 +69,7 @@ dpkg-deb --build --root-owner-group \
 
 mkdir -p "$stage/updater/systemd" "$stage/updater/release-trust"
 cp "$binary" "$stage/updater/updater-linux-amd64"
-cp "$root/install.sh" "$stage/updater/install.sh"
+sed "s|__WINDOW_PUBLIC_KEY_BASE64__|$window_public_b64|" "$root/install.sh" > "$stage/updater/install.sh"
 cp "$root/systemd/updater.service" "$stage/updater/systemd/"
 cp "$public_key" "$stage/updater/release-trust/updater.pem"
 cp "$root/release-trust/neptune.pem" "$root/release-trust/gryphon.pem" "$stage/updater/release-trust/"

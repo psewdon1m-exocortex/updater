@@ -115,6 +115,14 @@ func TestSharedWyvernUpdateDoesNotExposeAnArbitraryReleaseService(t *testing.T) 
 	}
 }
 
+func TestSharedUpdaterUpdateDoesNotExposeAnArbitraryReleaseService(t *testing.T) {
+	now := time.Now().UTC()
+	job := operatorJob(model.Job{ID: "updater-update-1", HeadID: "kernel", Service: "updater-self-update", State: "COMPLETED", CreatedAt: now, UpdatedAt: now})
+	if job.HeadID != "" || job.Component != "updater" {
+		t.Fatalf("shared Updater update exposed an arbitrary service: %+v", job)
+	}
+}
+
 func TestSharedGatewayReleaseRoutesRejectServiceSelection(t *testing.T) {
 	s := operatorFixture(t)
 	for _, item := range []struct{ path, body string }{
@@ -122,6 +130,8 @@ func TestSharedGatewayReleaseRoutesRejectServiceSelection(t *testing.T) {
 		{"/v1/actions", `{"component":"gryphon","kind":"update","head_id":"saturn","version":"1.2.3","request_id":"tui-request-123456"}`},
 		{"/v1/check", `{"component":"wyvern","head_id":"laboratory"}`},
 		{"/v1/actions", `{"component":"wyvern","kind":"update","head_id":"laboratory","version":"1.2.3","request_id":"tui-request-123456"}`},
+		{"/v1/check", `{"component":"updater","head_id":"kernel"}`},
+		{"/v1/actions", `{"component":"updater","kind":"update","head_id":"kernel","version":"1.2.3","request_id":"tui-request-123456"}`},
 	} {
 		res := httptest.NewRecorder()
 		s.operatorHandler().ServeHTTP(res, httptest.NewRequest("POST", "http://updater.local"+item.path, strings.NewReader(item.body)))
@@ -138,6 +148,16 @@ func TestOperatorReleaseCheckReportsSourceFailure(t *testing.T) {
 	s.operatorHandler().ServeHTTP(response, request)
 	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "updater release source is unavailable") {
 		t.Fatalf("operator lost the actionable release-source error: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestOperatorUpdaterUpdateRetainsHostReleasePath(t *testing.T) {
+	s := operatorFixture(t)
+	request := httptest.NewRequest(http.MethodPost, "http://updater.local/v1/actions", strings.NewReader(`{"component":"updater","kind":"update","version":"0.5.1","request_id":"tui-request-123456"}`))
+	response := httptest.NewRecorder()
+	s.operatorHandler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("host update did not reach release discovery: %d %s", response.Code, response.Body.String())
 	}
 }
 

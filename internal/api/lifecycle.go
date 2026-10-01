@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os/exec"
 	"sync"
 	"time"
 	"updater/internal/component"
@@ -24,9 +23,12 @@ type lifecycleRequest struct {
 var lifecycleStart sync.Mutex
 
 func (s Server) lifecycle(mux *http.ServeMux) {
-	for _, kind := range []string{"gryphon-initialization", "neptune-installation", "wyvern-installation", "updater-self-update"} {
+	mux.HandleFunc("POST /v1/lifecycle/updater-self-update", func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, 403, errors.New("Update Updater with sudo updater tui"))
+	})
+	for _, kind := range []string{"gryphon-initialization", "neptune-installation", "wyvern-installation", "window-installation"} {
 		mux.HandleFunc("POST /v1/lifecycle/"+kind, func(w http.ResponseWriter, r *http.Request) {
-			if (kind == "gryphon-initialization" || kind == "wyvern-installation") && r.Context().Value(operatorDispatchKey{}) != true {
+			if (kind == "gryphon-initialization" || kind == "wyvern-installation" || kind == "window-installation") && r.Context().Value(operatorDispatchKey{}) != true {
 				writeError(w, 403, errors.New("Manage the shared gateway with updater tui"))
 				return
 			}
@@ -43,10 +45,16 @@ func (s Server) lifecycle(mux *http.ServeMux) {
 			hostOperator := input.HeadID == "" && r.Context().Value(operatorDispatchKey{}) == true
 			var head config.HeadConfig
 			if !hostOperator {
-				if err := s.authorize(r, input.HeadID); err != nil { writeError(w, 401, err); return }
+				if err := s.authorize(r, input.HeadID); err != nil {
+					writeError(w, 401, err)
+					return
+				}
 				var err error
 				head, err = config.LoadHead(s.Runtime, input.HeadID)
-				if err != nil { writeError(w, 400, err); return }
+				if err != nil {
+					writeError(w, 400, err)
+					return
+				}
 			}
 			helper := "gryphon"
 			if kind == "neptune-installation" {
@@ -55,7 +63,10 @@ func (s Server) lifecycle(mux *http.ServeMux) {
 			if kind == "wyvern-installation" {
 				helper = "wyvern"
 			}
-			if !hostOperator && kind != "updater-self-update" && !component.ConsumesHelper(head.Service, helper) {
+			if kind == "window-installation" {
+				helper = "window"
+			}
+			if !hostOperator && !component.ConsumesHelper(head.Service, helper) {
 				writeError(w, 403, errors.New("head does not consume the requested helper"))
 				return
 			}
@@ -107,44 +118,33 @@ func (s Server) lifecycle(mux *http.ServeMux) {
 				writeError(w, 500, err)
 				return
 			}
-			if kind == "updater-self-update" {
-				// The supervisor survives replacement/restart of updater.service.
-				command := exec.Command("systemd-run", "--unit=exocortex-updater-self-update", "--collect", "--property=Type=exec", "--property=RuntimeMaxSec=600", "/usr/bin/updater", "self-update-job", job.ID)
-				if err := command.Run(); err != nil {
-					job.State = "FAILED"
-					job.Message = "Cannot start the self-update supervisor"
-					job.FinishedAt = &now
-					_ = s.Store.Save(job)
-					writeError(w, 503, errors.New(job.Message))
-					return
+			handedOff = true
+			go func(job model.Job, input lifecycleRequest) {
+				defer releaseOperation()
+				job.State = "INSTALLING"
+				job.UpdatedAt = time.Now().UTC()
+				_ = s.Store.Save(job)
+				var err error
+				if kind == "gryphon-initialization" {
+					job.Version, err = component.InitializeGryphon(s.Runtime, input.HeadID)
+				} else if kind == "neptune-installation" {
+					job.Version, err = component.InstallLatestNeptune(s.Runtime, input.HeadID)
+				} else if kind == "wyvern-installation" {
+					job.Version, err = component.InstallOrLinkWyvern(s.Runtime, input.HeadID, "link-"+job.ID)
+				} else if kind == "window-installation" {
+					job.Version, err = component.InstallLatestWindow(s.Runtime, s.Version)
 				}
-			} else {
-				handedOff = true
-				go func(job model.Job, input lifecycleRequest) {
-					defer releaseOperation()
-					job.State = "INSTALLING"
-					job.UpdatedAt = time.Now().UTC()
-					_ = s.Store.Save(job)
-					var err error
-					if kind == "gryphon-initialization" {
-						job.Version, err = component.InitializeGryphon(s.Runtime, input.HeadID)
-					} else if kind == "neptune-installation" {
-						job.Version, err = component.InstallLatestNeptune(s.Runtime, input.HeadID)
-					} else if kind == "wyvern-installation" {
-						job.Version, err = component.InstallOrLinkWyvern(s.Runtime, input.HeadID, "link-"+job.ID)
-					}
-					job.UpdatedAt = time.Now().UTC()
-					job.FinishedAt = &job.UpdatedAt
-					if err != nil {
-						job.State = "FAILED"
-						job.Message = err.Error()
-					} else {
-						job.State = "COMPLETED"
-						job.Message = "Component operation completed and verified"
-					}
-					_ = s.Store.Save(job)
-				}(job, input)
-			}
+				job.UpdatedAt = time.Now().UTC()
+				job.FinishedAt = &job.UpdatedAt
+				if err != nil {
+					job.State = "FAILED"
+					job.Message = err.Error()
+				} else {
+					job.State = "COMPLETED"
+					job.Message = "Component operation completed and verified"
+				}
+				_ = s.Store.Save(job)
+			}(job, input)
 			writeJSON(w, http.StatusAccepted, job)
 		})
 	}

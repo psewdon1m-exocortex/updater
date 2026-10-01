@@ -15,11 +15,15 @@ import (
 )
 
 func (s Server) candidate(headID, kind string) (release.Candidate, error) {
-	if kind == "updater" || kind == "neptune" || kind == "gryphon" || kind == "wyvern" {
+	if kind == "updater" || kind == "neptune" || kind == "gryphon" || kind == "wyvern" || kind == "window" {
 		current := s.Version
 		if kind != "updater" {
 			var err error
-			current, err = component.InstalledVersion(kind)
+			if kind == "window" {
+				current, err = component.WindowDiskVersion()
+			} else {
+				current, err = component.InstalledVersion(kind)
+			}
 			if err != nil {
 				return release.Candidate{}, err
 			}
@@ -82,8 +86,8 @@ func (s Server) protocol(mux *http.ServeMux) {
 			writeError(w, 400, err)
 			return
 		}
-		if input.Component == "gryphon" || input.Component == "wyvern" {
-			writeError(w, 403, errors.New("Check shared gateway releases with updater tui"))
+		if input.Component == "updater" || input.Component == "neptune" || input.Component == "gryphon" || input.Component == "wyvern" || input.Component == "window" {
+			writeError(w, 403, errors.New("Check shared host component releases with sudo updater tui"))
 			return
 		}
 		if err := s.authorize(r, input.HeadID); err != nil {

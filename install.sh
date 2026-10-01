@@ -40,11 +40,25 @@ fi
 getent group updater >/dev/null 2>&1 || groupadd --system updater
 install -d -o root -g updater -m 0750 /etc/exocortex /run/exocortex
 install -d -o root -g root -m 0755 /etc/exocortex/release-trust
-for trust_service in updater neptune gryphon wyvern; do
+window_public_b64='__WINDOW_PUBLIC_KEY_BASE64__'
+window_temp=''
+for trust_service in updater neptune gryphon wyvern window; do
   bundled_trust="$script_dir/release-trust/$trust_service.pem"
   # Older non-LLM head bundles may omit this optional trust scope. Wyvern
   # installers require it and VerifyBytes never accepts a missing host pin.
   if [ "$trust_service" = wyvern ] && [ ! -e "$bundled_trust" ]; then continue; fi
+  if [ "$trust_service" = window ] && [ ! -e "$bundled_trust" ]; then
+    case "$window_public_b64" in
+      __WINDOW_*) echo 'The signed Updater installer has no embedded Window trust anchor.' >&2; exit 5 ;;
+    esac
+    window_temp="$(mktemp /run/window-release-trust.XXXXXX)"
+    printf '%s' "$window_public_b64" | base64 -d > "$window_temp"
+    openssl pkey -pubin -in "$window_temp" -noout >/dev/null 2>&1 || {
+      echo 'The signed Updater installer has invalid Window trust.' >&2
+      exit 5
+    }
+    bundled_trust="$window_temp"
+  fi
   [ -f "$bundled_trust" ] && [ ! -L "$bundled_trust" ] || {
     echo "The signed Updater bundle has no release-trust/$trust_service.pem." >&2
     exit 5
@@ -56,6 +70,7 @@ for trust_service in updater neptune gryphon wyvern; do
   fi
   [ -f "$trust_file" ] || install -o root -g root -m 0644 "$bundled_trust" "$trust_file"
 done
+[ -z "$window_temp" ] || rm -f "$window_temp"
 
 updater_env=/etc/exocortex/updater/.env
 install -d -o root -g root -m 0700 /etc/exocortex/updater
@@ -86,8 +101,19 @@ getent group neptune-clients >/dev/null 2>&1 || groupadd --system neptune-client
 getent group gryphon-clients >/dev/null 2>&1 || groupadd --system gryphon-clients
 id neptune >/dev/null 2>&1 || useradd --system --gid neptune --home /var/lib/neptune --shell /usr/sbin/nologin neptune
 id gryphon >/dev/null 2>&1 || useradd --system --gid gryphon-clients --home /var/lib/gryphon --shell /usr/sbin/nologin gryphon
+getent group window >/dev/null 2>&1 || groupadd --system window
+id window >/dev/null 2>&1 || useradd --system --gid window --home /var/lib/window-ssh --shell /bin/sh window
+[ "$(getent passwd window | cut -d: -f6-7)" = '/var/lib/window-ssh:/bin/sh' ] || { echo 'Window account identity differs from the dedicated SSH account.' >&2; exit 5; }
+[ "$(id -gn window)" = window ] && [ "$(id -nG window)" = window ] || { echo 'Window SSH account has unexpected groups.' >&2; exit 5; }
+# "NP" is an invalid password hash: password login is impossible while
+# OpenSSH can still admit the one forced-command public key with UsePAM=no.
+usermod --password NP window
+install -d -o root -g root -m 0755 /var/lib/window-ssh /var/lib/window-ssh/.ssh
+install -d -o root -g root -m 0700 /var/lib/window /var/lib/window/test-results
+install -d -o root -g root -m 0755 /run/window
+install -d -o root -g root -m 0700 /run/window-admin
 usermod -a -G neptune,neptune-clients,updater neptune
-install -d -m 0755 /usr/local/lib/updater /usr/local/lib/neptune /usr/local/lib/gryphon /usr/local/sbin /opt/exocortex
+install -d -m 0755 /usr/local/lib/updater /usr/local/lib/neptune /usr/local/lib/gryphon /usr/local/lib/window /usr/local/sbin /usr/local/bin /opt/exocortex
 install -d -o root -g updater -m 0750 /etc/exocortex/units
 install -d -o root -g neptune -m 0750 /etc/neptune
 install -d -o root -g gryphon-clients -m 0750 /etc/gryphon
@@ -100,7 +126,7 @@ install -d -o neptune -g neptune -m 0700 /var/lib/neptune
 install -d -o neptune -g neptune -m 0700 /var/cache/neptune
 install -d -o gryphon -g gryphon-clients -m 0700 /var/lib/gryphon
 install -d -m 0755 /etc/systemd/system/multi-user.target.wants
-for helper in neptune gryphon; do
+for helper in neptune gryphon window; do
   unit="/etc/systemd/system/$helper.service"
   if [ -f "$unit" ] && [ ! -L "$unit" ]; then
     install -m 0644 "$unit" "/etc/exocortex/units/$helper.service"
@@ -116,6 +142,7 @@ if [ -f /usr/local/sbin/gryphon ] && [ ! -L /usr/local/sbin/gryphon ]; then
 fi
 ln -sfn /usr/local/lib/neptune/neptunectl /usr/local/sbin/neptunectl
 ln -sfn /usr/local/lib/gryphon/gryphonctl /usr/local/sbin/gryphon
+ln -sfn /usr/local/lib/window/window /usr/local/bin/window
 # A dedicated writable directory makes atomic self replacement possible.
 if [ -f /usr/bin/updater ] && [ ! -L /usr/bin/updater ]; then
   install -m 0755 /usr/bin/updater /usr/local/lib/updater/updater

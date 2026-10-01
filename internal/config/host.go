@@ -57,7 +57,7 @@ func validateHost(cfg HostConfig) error {
 		return errors.New("Kernel token file must have an absolute path")
 	}
 	for component, raw := range cfg.ReleaseSources {
-		if component != "updater" && component != "neptune" && component != "gryphon" && component != "wyvern" {
+		if component != "updater" && component != "neptune" && component != "gryphon" && component != "wyvern" && component != "window" {
 			return fmt.Errorf("unknown host component %q", component)
 		}
 		if !validHTTPS(raw) {

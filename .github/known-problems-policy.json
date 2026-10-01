@@ -1,0 +1,39 @@
+{
+  "schema": "exocortex.updater.known-problems-policy.v1",
+  "catalog_repository": "https://github.com/psewdon1m-exocortex/general",
+  "catalog_revision": "65b2f5461a4499243024f4125fb7d4db3df89ad6",
+  "catalog_path": "PART_12_KNOWN_DEPLOYMENT_AND_OPERATIONS_PROBLEMS.md",
+  "catalog_sha256": "413cd04e0a7c082a9d1cd3b33236230f4047338321e5f5f44230e8f356c45d65",
+  "catalog_ids_sha256": "66650a766bc6f36830fe109ee47d218b973bb93f53295b35dc16a864c36d9bd7",
+  "not_applicable": {
+    "no_public_web": {
+      "ids": ["HLT-02", "HLT-03", "HLT-05", "HLT-06", "HLT-10", "HLT-12", "INT-09", "INT-10", "INT-11", "NET-01", "NET-02", "NET-03", "NET-04", "NET-05", "NET-06", "NET-08", "NET-09", "NET-10", "NET-11", "NET-12", "NET-13", "OPS-07"],
+      "reason": "Updater has no public HTTP listener, Nginx vhost, browser UI, webhook or web upload route; inspected cmd/updater, systemd/updater.service and internal/api. Those edges belong to separate application heads."
+    },
+    "no_dashboard_metrics": {
+      "ids": ["HLT-04"],
+      "reason": "Updater publishes no dashboard measurement that can become a stale displayed zero; inspected root TUI status and local health code."
+    },
+    "no_remote_storage": {
+      "ids": ["DATA-05", "DATA-07", "DATA-08", "DATA-10", "HLT-07", "TRUST-02"],
+      "reason": "Updater has no SFTP client, independent remote storage account, object namespace or replication workflow; inspected internal/hostrecovery and internal/state. Neptune and application heads own external storage."
+    },
+    "no_operator_access_key": {
+      "ids": ["BST-08", "BST-13"],
+      "reason": "Updater does not create or validate an operator-chosen web Access Key; its host administrator authenticates through local root TUI, and service machine credentials follow a separate scoped contract."
+    }
+  },
+  "final_signed_ids": ["REL-04", "REL-05", "REL-06", "REL-07", "REL-09", "TRUST-06"],
+  "evidence_by_prefix": {
+    "REL": [".github/workflows/ci.yml", ".github/workflows/release.yml", "scripts/test-legacy-installer.py candidate archive check", "signed release and anonymous asset smoke"],
+    "BST": ["sh -n bootstrap.sh install.sh", "go test -count=1 ./internal/selfupdate", "scripts/test-legacy-installer.py candidate archive check"],
+    "TRUST": ["go test -count=1 ./internal/releaseauth ./internal/kernel", "scripts/sign-release.mjs and release signature verification"],
+    "PERM": ["go test -count=1 ./internal/api ./internal/selfupdate ./internal/socketmount", "install.sh and systemd/updater.service review"],
+    "CTR": ["go test -count=1 ./internal/engine ./internal/component ./internal/socketmount", "DEPLOYMENT_READINESS.md"],
+    "NET": ["bootstrap.sh HTTPS-only dependency checks", "DEPLOYMENT_READINESS.md external readiness commands"],
+    "HLT": ["go test -count=1 ./internal/component ./internal/selfupdate ./internal/api", "DEPLOYMENT_READINESS.md"],
+    "INT": ["go test -count=1 ./internal/hostrelease ./internal/kernel ./internal/api ./internal/console", "scripts/test-tui-pty.py"],
+    "DATA": ["go test -count=1 ./internal/hostrecovery ./internal/state ./internal/api", "DEPLOYMENT_READINESS.md"],
+    "OPS": ["python3 scripts/pre-push-gate.py", "DEPLOYMENT_READINESS.md", "scripts/test-tui-pty.py"]
+  }
+}

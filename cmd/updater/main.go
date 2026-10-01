@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,7 +24,8 @@ import (
 	"updater/internal/tui"
 )
 
-var version = "0.6.6"
+var version = "0.6.7"
+var windowKeyBlob = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
 
 func main() {
 	if len(os.Args) < 2 {
@@ -206,6 +208,28 @@ func main() {
 		handleNeptune(runtime, os.Args[2:])
 	case "wyvern":
 		handleWyvern(runtime, os.Args[2:])
+	case "window":
+		if os.Geteuid() != 0 {
+			fatal("Window management requires root")
+		}
+		if len(os.Args) == 5 && os.Args[2] == "pair" && os.Args[3] == "--key-base64" {
+			if len(os.Args[4]) > 128 || !windowKeyBlob.MatchString(os.Args[4]) {
+				fatal("Invalid Window public key")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			fingerprint, err := api.PairWindowPublicKey(ctx, "ssh-ed25519 "+os.Args[4])
+			exitIf(err)
+			fmt.Printf("Window development PC paired: %s\n", fingerprint)
+			break
+		}
+		if len(os.Args) != 5 || os.Args[2] != "install" || os.Args[3] != "--version" {
+			fatal("usage: sudo updater window install --version <exact-version> | pair --key-base64 <public-key-blob>")
+		}
+		release := acquireHostOperation(runtime, "")
+		defer release()
+		exitIf(component.UpdateWindow(runtime, os.Args[4], version))
+		fmt.Printf("Window %s is installed and healthy\n", os.Args[4])
 	case "gryphon":
 		if len(os.Args) == 5 && os.Args[2] == "link" && os.Args[3] == "--head" {
 			release := acquireHostOperation(runtime, "")
@@ -268,6 +292,8 @@ func help() {
 	fmt.Println("  updater gryphon install [--head <id>]")
 	fmt.Println("  updater gryphon link --head <id>")
 	fmt.Println("  updater neptune|gryphon install --bundle <verified-directory>")
+	fmt.Println("  updater window pair --key-base64 <public-key-blob>")
+	fmt.Println("  updater window install --version <exact-version>")
 	fmt.Println("  updater neptune enroll --head <id> --project <id> --export-url <loopback-url>")
 	fmt.Println("  updater neptune doctor")
 	fmt.Println("  updater version")

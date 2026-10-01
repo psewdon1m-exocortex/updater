@@ -20,7 +20,7 @@ var observedVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:[.-][a-zA-Z0
 // LocalComponents can run even when the operator API is down. It only observes
 // fixed units/paths; no service is started or modified by a status refresh.
 func LocalComponents(ctx context.Context, updaterVersion string) []Component {
-	items := []Component{{ID: "updater"}, {ID: "neptune"}, {ID: "gryphon"}, {ID: "wyvern"}}
+	items := []Component{{ID: "updater"}, {ID: "neptune"}, {ID: "gryphon"}, {ID: "wyvern"}, {ID: "window"}}
 	var group sync.WaitGroup
 	for index := range items {
 		group.Add(1)
@@ -51,6 +51,9 @@ func observe(ctx context.Context, kind string) Component {
 	if kind == "wyvern" {
 		binary, socket, route, schema = "/etc/exocortex/units/wyvern.service", WyvernAdminSocket, "/v1/status", "exocortex.wyvern.status.v1"
 	}
+	if kind == "window" {
+		binary, socket, route = "/usr/local/bin/window", "/run/window-admin/admin.sock", "/v1/status"
+	}
 	_, statErr := os.Stat(binary)
 	item.Installed = statErr == nil
 	output, err := exec.CommandContext(ctx, "systemctl", "show", "--property=ActiveState", "--value", kind+".service").Output()
@@ -70,6 +73,29 @@ func observe(ctx context.Context, kind string) Component {
 			}
 			if health.Drain {
 				item.Detail = "New LLM requests are paused for all clients. Active requests can finish."
+			}
+			return item
+		}
+	}
+	if kind == "window" {
+		var status struct {
+			Version     string `json:"version"`
+			Paired      bool   `json:"paired"`
+			Open        bool   `json:"open"`
+			Live        bool   `json:"live"`
+			Fingerprint string `json:"fingerprint"`
+		}
+		if err := LocalJSON(ctx, socket, route, &status); err == nil {
+			item.Installed, item.Health, item.Version = true, "ready", Text(status.Version)
+			item.Detail = "Closed. Pair a development PC, then open a timed grant."
+			if status.Paired {
+				item.Detail = "Paired: " + Text(status.Fingerprint) + "; grant closed."
+			}
+			if status.Open {
+				item.Detail = "Read-only grant open; close this TUI or revoke it to stop access."
+			}
+			if status.Live {
+				item.Detail += " Observed shell active."
 			}
 			return item
 		}

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.7 — 2026-10-01
+
+- Add Window as a separately signed, shared host diagnostic agent with root
+  TUI pairing, timed read grants, emergency revocation and observed shell.
+- Provision its dedicated SSH identity and pinned release trust during Updater
+  installation; verify Window releases and roll back failed activations.
+- Allow first-time Window pairing through an existing operator's password SSH
+  login and root CLI; later Codex reads still use the dedicated SSH key.
+- Keep the 0.6.7 install archive compatible with 0.6.6 self-update by embedding
+  the Window public trust anchor in the signed installer script.
+
 ## 0.6.6 — 2026-09-29
 
 - Show the bounded underlying error when a host TUI release check fails, and

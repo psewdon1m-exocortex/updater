@@ -42,6 +42,9 @@ func extractInstallation(archive, destination, binaryHash string) (string, error
 	reader := tar.NewReader(compressed)
 	seen := map[string]bool{}
 	expected := map[string]int64{"updater/updater-linux-amd64": 64 * 1024 * 1024, "updater/install.sh": 256 * 1024, "updater/systemd/updater.service": 64 * 1024, "updater/release-trust/updater.pem": 16 * 1024, "updater/release-trust/neptune.pem": 16 * 1024, "updater/release-trust/gryphon.pem": 16 * 1024, "updater/release-trust/wyvern.pem": 16 * 1024}
+	// A future bundle may carry Window trust as a separate member. The 0.6.7
+	// transition bundle keeps the older seven-file contract for 0.6.6 hosts.
+	optional := map[string]int64{"updater/release-trust/window.pem": 16 * 1024}
 	for {
 		h, err := reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -54,6 +57,9 @@ func extractInstallation(archive, destination, binaryHash string) (string, error
 			continue
 		}
 		limit, ok := expected[h.Name]
+		if !ok {
+			limit, ok = optional[h.Name]
+		}
 		if !ok || seen[h.Name] || h.Typeflag != tar.TypeReg || h.Size < 1 || h.Size > limit {
 			return "", errors.New("invalid signed installer archive member")
 		}
@@ -78,8 +84,10 @@ func extractInstallation(archive, destination, binaryHash string) (string, error
 			return "", closeErr
 		}
 	}
-	if len(seen) != len(expected) {
-		return "", errors.New("signed installer archive is incomplete")
+	for name := range expected {
+		if !seen[name] {
+			return "", errors.New("signed installer archive is incomplete")
+		}
 	}
 	root := filepath.Join(destination, "updater")
 	if err = verify(filepath.Join(root, "updater-linux-amd64"), binaryHash); err != nil {
