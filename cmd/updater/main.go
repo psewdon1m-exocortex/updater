@@ -24,7 +24,7 @@ import (
 	"updater/internal/tui"
 )
 
-var version = "0.6.7"
+var version = "0.6.9"
 var windowKeyBlob = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
 
 func main() {
@@ -228,7 +228,7 @@ func main() {
 		}
 		release := acquireHostOperation(runtime, "")
 		defer release()
-		exitIf(component.UpdateWindow(runtime, os.Args[4], version))
+		exitIf(component.InstallWindowBootstrap(runtime, os.Args[4], version))
 		fmt.Printf("Window %s is installed and healthy\n", os.Args[4])
 	case "gryphon":
 		if len(os.Args) == 5 && os.Args[2] == "link" && os.Args[3] == "--head" {

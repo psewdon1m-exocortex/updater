@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.9 — 2026-10-01
+
+- Allow Window's root-only exact-version bootstrap command to install from its
+  seeded host repository when a reachable Kernel Register has no Window key.
+  Updater still verifies the exact signed release and asset digests. Ordinary
+  TUI discovery and updates continue to fail closed on incomplete Register data.
+
 ## 0.6.8 — 2026-10-01
 
 - Restore the package build umask after creating the temporary pre-signing

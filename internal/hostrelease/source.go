@@ -65,6 +65,26 @@ func Resolve(runtime config.Runtime, component string) (Source, error) {
 	return Source{Component: component, Repository: repository, Origin: "tui-fallback", Reason: reason}, nil
 }
 
+// ResolveWindowBootstrap is only for the root CLI's exact-version Window
+// installation. Its intended caller is Window's signed bootstrap, which seeds
+// this host-owned URL. Updater independently verifies the selected signed
+// release. Ordinary discovery and TUI updates still use Resolve and fail
+// closed on an incomplete reachable Kernel Register.
+func ResolveWindowBootstrap(runtime config.Runtime) (Source, error) {
+	cfg, err := config.LoadHost(runtime)
+	if err != nil {
+		return Source{}, err
+	}
+	repository := cfg.ReleaseSources["window"]
+	if repository == "" {
+		return Source{}, errors.New("Window exact-version bootstrap source is absent; run the signed Window bootstrap first")
+	}
+	if err := validateRepository(repository); err != nil {
+		return Source{}, err
+	}
+	return Source{Component: "window", Repository: repository, Origin: "exact-bootstrap"}, nil
+}
+
 func validateRepository(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.TrimSpace(u.Path) == "" {

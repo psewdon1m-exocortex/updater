@@ -91,6 +91,18 @@ func InstallLatestWindow(cfg config.Runtime, updaterVersion string) (string, err
 }
 
 func UpdateWindow(cfg config.Runtime, version, updaterVersion string) error {
+	return updateWindow(cfg, version, updaterVersion, false)
+}
+
+// InstallWindowBootstrap lets the root-only exact-version command use the
+// repository seeded by Window's bootstrap before Kernel Register has a Window
+// entry. The signed release is verified again below. TUI discovery and updates
+// never use this path.
+func InstallWindowBootstrap(cfg config.Runtime, version, updaterVersion string) error {
+	return updateWindow(cfg, version, updaterVersion, true)
+}
+
+func updateWindow(cfg config.Runtime, version, updaterVersion string, bootstrap bool) error {
 	if !release.Stable(version) {
 		return errors.New("An exact stable Window version is required")
 	}
@@ -105,7 +117,13 @@ func UpdateWindow(cfg config.Runtime, version, updaterVersion string) error {
 		return errors.New("Window update is already running")
 	}
 	defer windowUpdateLock.Unlock()
-	source, err := hostrelease.Resolve(cfg, "window")
+	var source hostrelease.Source
+	var err error
+	if bootstrap {
+		source, err = hostrelease.ResolveWindowBootstrap(cfg)
+	} else {
+		source, err = hostrelease.Resolve(cfg, "window")
+	}
 	if err != nil {
 		return err
 	}

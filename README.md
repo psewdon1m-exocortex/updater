@@ -258,6 +258,11 @@ Updater 0.6.8 first publishes Window support as a shared, independently signed h
 agent. The root TUI manages its release source, installation, pairing, timed
 read grant, emergency revocation and observed operator shell. Window has no
 application consumer dependencies in this release.
+Updater 0.6.9 also supports Window's exact-version first install on a host
+whose reachable Kernel Register has no Window repository key. Rerun the signed
+Window bootstrap after updating Updater; ordinary TUI release checks still
+require that Register key or an unavailable Kernel connection with a configured
+fallback. See [deployment readiness](DEPLOYMENT_READINESS.md).
 The 0.6.8 signed install archive keeps the 0.6.6 member set so an existing
 Updater can self-update; its installer embeds the pinned Window public key.
 The release workflow runs CI and the pinned Part 12 gate before exposing its

@@ -1,5 +1,20 @@
 # updater deployment and recovery contract
 
+## 0.6.9 Window first-install source
+
+On a host with an existing Kernel connection whose Register has no
+`repositories.window.url`, Window 0.0.1's exact-version bootstrap seeds the
+Window repository, but Updater 0.6.8 rejects the ordinary source lookup before
+installing Window. Updater 0.6.9 gives only the root-only
+`updater window install --version 0.0.1` path the seeded repository. It verifies
+the pinned Window release signature, exact tag, manifest and asset digests as
+usual. TUI release discovery and updates still require a Window Register entry
+or an unavailable Kernel connection with an operator-configured fallback. Do
+not force a Kernel outage to bypass a missing Register key. On the affected
+host, update Updater to 0.6.9 through its verified self-update path, rerun the
+same immutable Window bootstrap, and verify the running Window unit and closed
+read grant. This host rehearsal is still `NOT_RUN` until observed on the server.
+
 ## 0.6.8 Window trust transition
 
 Updater 0.6.6 accepts only its original seven signed installer files. The

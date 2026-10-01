@@ -14,6 +14,13 @@ import (
 	"updater/internal/config"
 )
 
+func TestWindowExactBootstrapRequiresSeededSource(t *testing.T) {
+	runtime := config.Runtime{HostConfigPath: filepath.Join(t.TempDir(), "host.json")}
+	if _, err := ResolveWindowBootstrap(runtime); err == nil {
+		t.Fatal("exact Window install accepted an unseeded repository")
+	}
+}
+
 func TestHostSourceFallsBackOnlyWhenKernelConnectionIsUnavailable(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("requires a root-owned Kernel machine token")
@@ -79,11 +86,19 @@ func TestHostSourceFallsBackOnlyWhenKernelConnectionIsUnavailable(t *testing.T) 
 	defer server2.Close()
 	http.DefaultTransport = server2.Client().Transport
 	host.KernelURL = server2.URL
+	host.ReleaseSources["window"] = "https://github.com/example/window"
 	if err := config.SaveHost(runtime, host); err != nil {
 		t.Fatal(err)
 	}
 	source, err = Resolve(runtime, "neptune")
 	if err != nil || source.Origin != "kernel" || source.Repository != "https://github.com/example/live-neptune" {
 		t.Fatalf("scoped live Kernel source was not selected: %+v %v", source, err)
+	}
+	if _, err := Resolve(runtime, "window"); err == nil {
+		t.Fatal("ordinary Window source ignored the missing reachable Register key")
+	}
+	source, err = ResolveWindowBootstrap(runtime)
+	if err != nil || source.Origin != "exact-bootstrap" || source.Repository != host.ReleaseSources["window"] {
+		t.Fatalf("signed exact-version bootstrap source was not selected: %+v %v", source, err)
 	}
 }
