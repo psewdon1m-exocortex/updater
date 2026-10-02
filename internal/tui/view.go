@@ -431,7 +431,7 @@ func (m Model) rows() []row {
 			}
 		}
 		if m.windowOnly {
-			add("Run sudo /usr/bin/updater tui --window-only from the windowops SSH account. Esc closes this console.")
+			add("Run sudo /usr/bin/updater tui -window from the windowops SSH account. Esc closes this console.")
 			return rows
 		}
 		for _, line := range []string{

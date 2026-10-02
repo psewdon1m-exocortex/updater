@@ -16,7 +16,7 @@ import (
 func Run(arguments []string, socket string) error {
 	flags := flag.NewFlagSet("updater tui", flag.ContinueOnError)
 	demo := flags.Bool("demo", false, "Explore synthetic data without service access")
-	windowOnly := flags.Bool("window-only", false, "Open only Window operator controls")
+	windowOnly := flags.Bool("window", false, "Open only Window operator controls")
 	noColor := flags.Bool("no-color", os.Getenv("NO_COLOR") != "", "Use monochrome rendering")
 	flags.StringVar(&socket, "socket", socket, "Local operator socket")
 	flags.SetOutput(os.Stderr)
@@ -27,7 +27,7 @@ func Run(arguments []string, socket string) error {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: updater tui [--demo] [--no-color] [--window-only] [--socket PATH]")
+		return errors.New("usage: updater tui [--demo] [--no-color] [-window] [--socket PATH]")
 	}
 	if *windowOnly && *demo {
 		return errors.New("Window operator mode requires the live host")

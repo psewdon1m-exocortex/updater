@@ -63,7 +63,7 @@ unit removes the console entry point; existing job metadata stays compatible.
 The new socket contains no persisted configuration or credentials.
 
 Window installation provisions the separate `windowops` SSH account and a
-sudoers rule allowing only `updater tui --window-only`, Window key pairing and
+sudoers rule allowing only `updater tui -window`, Window key pairing and
 bounded test capture. A new account starts with password login disabled; root
 sets its password or installs an SSH public key before the first Termius login.
 The restricted TUI opens directly in Window, cannot navigate to other

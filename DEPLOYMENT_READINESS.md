@@ -1,5 +1,12 @@
 # updater deployment and recovery contract
 
+## 0.6.12 restricted Window flag
+
+Updater 0.6.12 exposes the restricted Window operator console as
+`updater tui -window` and provisions the matching narrow `windowops` sudoers
+entry. Window releases that require this spelling must pin Updater 0.6.12 or
+newer.
+
 ## 0.6.11 image retention and restricted Window operations
 
 Updater 0.6.11 adds a bounded Docker image cleanup operation on the private
@@ -11,7 +18,7 @@ bounded job history so rollback can verify or pull the exact historical image
 before changing the current deployment.
 
 The installer also provisions the unprivileged `windowops` account and a narrow
-sudoers rule for `updater tui --window-only`, Window pairing and bounded test
+sudoers rule for `updater tui -window`, Window pairing and bounded test
 capture. Existing credentials are preserved; a new account remains locked until
 an operator installs an SSH key or sets a password.
 

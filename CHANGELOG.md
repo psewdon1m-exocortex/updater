@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.12 — 2026-10-02
+
+- Expose the restricted Window operator console through the concise
+  `updater tui -window` flag and align the installed `windowops` sudo policy.
+
 ## 0.6.11 — 2026-10-02
 
 - Add a root-only, preview-and-confirm Docker image cleanup flow that preserves
