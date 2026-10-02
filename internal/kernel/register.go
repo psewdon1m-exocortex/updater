@@ -21,6 +21,12 @@ import (
 var voltReference = regexp.MustCompile(`(?i)^volt://[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/[1-5]$`)
 var ErrUnavailable = errors.New("Kernel connection unavailable")
 
+type ResolutionStatusError struct{ StatusCode int }
+
+func (e ResolutionStatusError) Error() string {
+	return fmt.Sprintf("Kernel value resolution returned HTTP %d", e.StatusCode)
+}
+
 type Snapshot struct {
 	Schema   string                 `json:"schema"`
 	Revision string                 `json:"revision"`
@@ -164,7 +170,7 @@ func resolveSnapshot(kernelURL, token string, snapshot Snapshot, client *http.Cl
 		payload, readErr := io.ReadAll(io.LimitReader(response.Body, 1024*1024+1))
 		response.Body.Close()
 		if readErr != nil || len(payload) > 1024*1024 || response.StatusCode != http.StatusOK {
-			return Snapshot{}, fmt.Errorf("Kernel value resolution returned HTTP %d", response.StatusCode)
+			return Snapshot{}, ResolutionStatusError{StatusCode: response.StatusCode}
 		}
 		var resolved resolutionResponse
 		if json.Unmarshal(payload, &resolved) != nil || resolved.Schema != "exocortex.register.resolution.v1" {

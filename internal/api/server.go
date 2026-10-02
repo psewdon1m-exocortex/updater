@@ -16,17 +16,19 @@ import (
 	"updater/internal/component"
 	"updater/internal/config"
 	"updater/internal/engine"
+	"updater/internal/imagecache"
 	"updater/internal/model"
 	"updater/internal/state"
 )
 
 type Server struct {
-	Version string
-	Runtime config.Runtime
-	Store   *state.Store
-	Engine  *engine.Engine
-	OnReady func()
-	Prepare func() error
+	Version    string
+	Runtime    config.Runtime
+	Store      *state.Store
+	Engine     *engine.Engine
+	ImageCache *imagecache.Cache
+	OnReady    func()
+	Prepare    func() error
 	// Host-owned operator transport. Never derived from service request fields.
 	WyvernSocket  string
 	WyvernManager *component.WyvernManager

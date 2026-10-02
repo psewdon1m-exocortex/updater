@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,11 @@ type Runner interface {
 }
 
 type OSRunner struct{}
+
+var immutableImagePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$`)
+var localImageIDPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+
+func immutableImageReference(value string) bool { return immutableImagePattern.MatchString(value) }
 
 type boundedCommandOutput struct {
 	mu       sync.Mutex
@@ -371,6 +377,21 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 		return
 	} else {
 		job.PreviousImage = strings.TrimSpace(string(output))
+		// The container's Config.Image may be only a local image ID. Record an
+		// independently pullable reference only when the signed deployment's
+		// current environment names that exact running image.
+		if values, parseErr := config.ParseEnvFile(head.EnvFile); parseErr == nil {
+			ref := strings.TrimSpace(values[head.ImageVariable])
+			if immutableImageReference(ref) {
+				if ref == job.PreviousImage {
+					job.PreviousImagePull = ref
+				} else if localImageIDPattern.MatchString(job.PreviousImage) {
+					if output, inspectErr := e.runner.Run(ctx, "docker", []string{"image", "inspect", "--format", "{{.Id}}", ref}, nil, head.ProjectDir); inspectErr == nil && strings.TrimSpace(string(output)) == job.PreviousImage {
+						job.PreviousImagePull = ref
+					}
+				}
+			}
+		}
 		job.PreviousVersion = head.CurrentVersion
 		_ = e.store.Save(job)
 	}
@@ -425,6 +446,14 @@ func (e *Engine) run(job model.Job, head config.HeadConfig) {
 		return
 	}
 	job.RollbackAvailable = true
+	previousGeneration := []string{job.PreviousImage}
+	if job.PreviousWebImage != "" {
+		previousGeneration = append(previousGeneration, job.PreviousWebImage)
+	}
+	if err := e.store.SaveImageGeneration(head.ID, previousGeneration); err != nil {
+		fail(errors.New("cannot preserve the previous image generation"))
+		return
+	}
 	job.MutationStarted = true
 	if err := e.store.Save(job); err != nil {
 		fail(err)
@@ -486,6 +515,23 @@ func (e *Engine) composeUp(ctx context.Context, head config.HeadConfig) ([]byte,
 }
 
 func (e *Engine) rollback(ctx context.Context, job *model.Job, head config.HeadConfig) error {
+	if err := e.ensureRollbackImages(ctx, *job, head); err != nil {
+		return err
+	}
+	currentValues, err := config.ParseEnvFile(head.EnvFile)
+	if err != nil {
+		return err
+	}
+	current := []string{currentValues[head.ImageVariable]}
+	if head.Service == "saturn" {
+		current = append(current, currentValues["VAULT_WEB_IMAGE"])
+	}
+	if head.Service == "mastermind" {
+		current = []string{currentValues["MASTERMIND_CORE_IMAGE"], currentValues["MASTERMIND_RUNTIME_IMAGE"], currentValues["MASTERMIND_WORKER_IMAGE"]}
+	}
+	if err := e.store.SaveImageGeneration(head.ID, current); err != nil {
+		return errors.New("cannot preserve the current image generation before rollback")
+	}
 	if head.Service == "mastermind" {
 		return e.rollbackMastermind(ctx, job, head)
 	}

@@ -16,6 +16,7 @@ import (
 func Run(arguments []string, socket string) error {
 	flags := flag.NewFlagSet("updater tui", flag.ContinueOnError)
 	demo := flags.Bool("demo", false, "Explore synthetic data without service access")
+	windowOnly := flags.Bool("window-only", false, "Open only Window operator controls")
 	noColor := flags.Bool("no-color", os.Getenv("NO_COLOR") != "", "Use monochrome rendering")
 	flags.StringVar(&socket, "socket", socket, "Local operator socket")
 	flags.SetOutput(os.Stderr)
@@ -26,7 +27,10 @@ func Run(arguments []string, socket string) error {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: updater tui [--demo] [--no-color] [--socket PATH]")
+		return errors.New("usage: updater tui [--demo] [--no-color] [--window-only] [--socket PATH]")
+	}
+	if *windowOnly && *demo {
+		return errors.New("Window operator mode requires the live host")
 	}
 	if !*demo && os.Geteuid() != 0 {
 		return errors.New("run sudo updater tui for host administration, or updater tui --demo to preview")
@@ -44,7 +48,11 @@ func Run(arguments []string, socket string) error {
 		defer client.Close()
 		backend = client
 	}
-	_, err := tea.NewProgram(New(backend, ctx, *noColor, *demo), tea.WithContext(ctx), tea.WithAltScreen(), tea.WithFPS(15), tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout)).Run()
+	model := New(backend, ctx, *noColor, *demo)
+	if *windowOnly {
+		model = NewWindowOnly(backend, ctx, *noColor)
+	}
+	_, err := tea.NewProgram(model, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithFPS(15), tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout)).Run()
 	if err != nil && !errors.Is(err, tea.ErrProgramKilled) {
 		return fmt.Errorf("terminal console: %w", err)
 	}

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.11 — 2026-10-02
+
+- Add a root-only, preview-and-confirm Docker image cleanup flow that preserves
+  current and previous deployment generations for offline rollback.
+- Persist immutable previous-image references outside bounded job history and
+  verify historical images before rollback mutates a deployment.
+- Provision a separate `windowops` account with narrowly scoped access to the
+  restricted Window operator TUI, pairing and bounded test capture.
+
 ## 0.6.10 — 2026-10-02
 
 - Add an authenticated, durable Neptune unlink operation that disables the

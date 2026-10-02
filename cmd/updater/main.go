@@ -24,7 +24,7 @@ import (
 	"updater/internal/tui"
 )
 
-var version = "0.6.10"
+var version = "0.6.11"
 var windowKeyBlob = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
 
 func main() {
@@ -279,7 +279,7 @@ func help() {
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  updater serve")
-	fmt.Println("  updater tui [--demo] [--no-color]")
+	fmt.Println("  updater tui [--demo] [--no-color] [--window-only]")
 	fmt.Println("  updater register-head <id> <env-file>")
 	fmt.Println("  updater migrate-head --head <id> --version <version> --saved-backup-stdin --confirm-saved")
 	fmt.Println("  updater status")

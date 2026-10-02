@@ -3,6 +3,7 @@ package hostrelease
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -50,6 +51,10 @@ func Resolve(runtime config.Runtime, component string) (Source, error) {
 				return Source{Component: component, Repository: repository, Origin: "kernel"}, nil
 			}
 			if !errors.Is(err, kernel.ErrUnavailable) {
+				var denied kernel.ResolutionStatusError
+				if errors.As(err, &denied) && denied.StatusCode == http.StatusForbidden {
+					return Source{}, fmt.Errorf("%s release source denied by Kernel (HTTP 403): check that Updater's machine principal can read repositories.%s.url; the saved fallback is not used after an authorization denial", component, component)
+				}
 				return Source{}, err
 			}
 			reason = err.Error()

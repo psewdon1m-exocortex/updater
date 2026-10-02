@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"updater/internal/config"
@@ -62,7 +63,7 @@ func TestHostSourceFallsBackOnlyWhenKernelConnectionIsUnavailable(t *testing.T) 
 	if _, err := Resolve(runtime, "neptune"); err == nil {
 		t.Fatal("reachable but unauthorized Kernel silently used fallback")
 	}
-	values := map[string]any{"repositories": map[string]any{"neptune": map[string]any{"url": "volt://11111111-1111-4111-8111-111111111111/1"}, "gryphon": map[string]any{"url": "volt://22222222-2222-4222-8222-222222222222/1"}}}
+	values := map[string]any{"repositories": map[string]any{"neptune": map[string]any{"url": "volt://11111111-1111-4111-8111-111111111111/1"}, "gryphon": map[string]any{"url": "volt://22222222-2222-4222-8222-222222222222/1"}, "window": map[string]any{"url": "volt://33333333-3333-4333-8333-333333333333/1"}}}
 	canonical, _ := json.Marshal(map[string]any{"values": values})
 	checksum := sha256.Sum256(canonical)
 	snapshot, _ := json.Marshal(map[string]any{"schema": "exocortex.register.snapshot.v1", "revision": "r1", "checksum": "sha256:" + hex.EncodeToString(checksum[:]), "values": values})
@@ -94,8 +95,8 @@ func TestHostSourceFallsBackOnlyWhenKernelConnectionIsUnavailable(t *testing.T) 
 	if err != nil || source.Origin != "kernel" || source.Repository != "https://github.com/example/live-neptune" {
 		t.Fatalf("scoped live Kernel source was not selected: %+v %v", source, err)
 	}
-	if _, err := Resolve(runtime, "window"); err == nil {
-		t.Fatal("ordinary Window source ignored the missing reachable Register key")
+	if _, err := Resolve(runtime, "window"); err == nil || !strings.Contains(err.Error(), "repositories.window.url") || !strings.Contains(err.Error(), "fallback is not used") {
+		t.Fatalf("ordinary Window source ignored or obscured the reachable Register denial: %v", err)
 	}
 	source, err = ResolveWindowBootstrap(runtime)
 	if err != nil || source.Origin != "exact-bootstrap" || source.Repository != host.ReleaseSources["window"] {

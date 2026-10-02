@@ -286,6 +286,9 @@ func (e *Engine) applyMastermind(ctx context.Context, job *model.Job, head confi
 	job.PreviousSchema = int(schema)
 	job.PreviousComponents = previous
 	job.PreviousImage = previous["core"]
+	if immutableImageReference(previous["core"]) && immutableImageReference(previous["runtime"]) && immutableImageReference(previous["worker"]) {
+		job.PreviousImagePull = previous["core"]
+	}
 	job.PreviousVersion = head.CurrentVersion
 	job.ComponentImages = images
 	job.ManifestSHA256 = hash
@@ -297,6 +300,9 @@ func (e *Engine) applyMastermind(ctx context.Context, job *model.Job, head confi
 	}
 	if err = snapshotDeployment(head, files, job.DeploymentSnapshot); err != nil {
 		return err
+	}
+	if err = e.store.SaveImageGeneration(head.ID, []string{previous["core"], previous["runtime"], previous["worker"]}); err != nil {
+		return errors.New("cannot preserve the previous image generation")
 	}
 	job.MutationStarted = true
 	if err = e.store.Save(*job); err != nil {
@@ -349,6 +355,12 @@ func (e *Engine) applyMastermind(ctx context.Context, job *model.Job, head confi
 func (e *Engine) rollbackMastermind(ctx context.Context, job *model.Job, head config.HeadConfig) error {
 	if len(job.PreviousComponents) != 3 || job.PreviousVersion == "" || job.PreviousSchema < 1 {
 		return errors.New("Mastermind rollback component snapshot is incomplete")
+	}
+	for _, component := range []string{"core", "runtime", "worker"} {
+		ref := job.PreviousComponents[component]
+		if err := e.ensureImageLocal(ctx, head, ref, ref); err != nil {
+			return err
+		}
 	}
 	if err := e.groupCommand(ctx, head, "stop", "core", "runtime", "worker"); err != nil {
 		return err

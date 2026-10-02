@@ -69,6 +69,9 @@ func (r *groupRunner) Run(_ context.Context, name string, args, environment []st
 	}
 	if args[0] == "image" {
 		if strings.Contains(call, "--format") {
+			if strings.Contains(call, "{{.Id}}") {
+				return []byte("sha256:" + strings.Repeat("a", 64)), nil
+			}
 			return []byte("linux/amd64"), nil
 		}
 		return []byte("[]"), nil

@@ -62,7 +62,28 @@ No new database migration is required. Rolling back the Updater executable and
 unit removes the console entry point; existing job metadata stays compatible.
 The new socket contains no persisted configuration or credentials.
 
+Window installation provisions the separate `windowops` SSH account and a
+sudoers rule allowing only `updater tui --window-only`, Window key pairing and
+bounded test capture. A new account starts with password login disabled; root
+sets its password or installs an SSH public key before the first Termius login.
+The restricted TUI opens directly in Window, cannot navigate to other
+components and still uses the same root-owned operator socket. The technical
+`window` account remains the forced-command MCP reader.
+If a Window release check receives Kernel HTTP 403, the operator must grant
+Updater's machine principal access to `repositories.window.url` in Kernel.
+The configured Window fallback URL cannot override a reachable denial.
+
 ## Terminal contract
+
+From the Updater component, **Review Docker image storage** displays a bounded
+cleanup plan. Enter opens a separate confirmation. The daemon recomputes the
+plan under its host operation lock and removes at most 12 reviewed image IDs
+without force. Registered current and previous generations remain local;
+unregistered repositories, containers, volumes, build cache and logs are not
+cleaned. If no previous generation can be established, that repository has no
+cleanup candidates. The image generation ledger is stored independently of
+the bounded job history. Window's `window_storage` tool offers read-only disk
+and Docker usage diagnostics under a temporary grant.
 
 Use arrows to select, Enter to open/confirm and Esc to cancel/back. Tab moves
 between form fields. `--no-color` (or `NO_COLOR`) keeps focus/status readable.

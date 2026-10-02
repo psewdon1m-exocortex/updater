@@ -105,6 +105,30 @@ getent group window >/dev/null 2>&1 || groupadd --system window
 id window >/dev/null 2>&1 || useradd --system --gid window --home /var/lib/window-ssh --shell /bin/sh window
 [ "$(getent passwd window | cut -d: -f6-7)" = '/var/lib/window-ssh:/bin/sh' ] || { echo 'Window account identity differs from the dedicated SSH account.' >&2; exit 5; }
 [ "$(id -gn window)" = window ] && [ "$(id -nG window)" = window ] || { echo 'Window SSH account has unexpected groups.' >&2; exit 5; }
+# The interactive operator is separate from Window's forced-command SSH reader.
+# Provision before the Updater daemon starts; its systemd sandbox cannot edit
+# local accounts or sudoers. Existing credentials and authorized_keys survive.
+if ! command -v visudo >/dev/null 2>&1; then
+  command -v apt-get >/dev/null 2>&1 || { echo 'sudo/visudo is required for the Window operator account.' >&2; exit 5; }
+  DEBIAN_FRONTEND=noninteractive apt-get install -y sudo
+fi
+id windowops >/dev/null 2>&1 || useradd --create-home --user-group --shell /bin/bash --password '!' windowops
+[ "$(getent passwd windowops | cut -d: -f6-7)" = '/home/windowops:/bin/bash' ] || { echo 'Window operator account must use /home/windowops and /bin/bash.' >&2; exit 5; }
+[ "$(id -gn windowops)" = windowops ] || { echo 'Window operator primary group must be windowops.' >&2; exit 5; }
+[ "$(id -u windowops)" -ne 0 ] || { echo 'Window operator account must not be root.' >&2; exit 5; }
+for privileged_group in root sudo wheel docker lxd updater window; do
+  case " $(id -nG windowops) " in *" $privileged_group "*) echo "Remove windowops from privileged group $privileged_group." >&2; exit 5 ;; esac
+done
+[ ! -L /home/windowops ] || { echo 'Window operator home must not be a symlink.' >&2; exit 5; }
+install -d -o windowops -g windowops -m 0700 /home/windowops
+install -d -o root -g root -m 0755 /etc/sudoers.d
+[ ! -L /etc/sudoers.d/windowops ] || { echo 'Window operator sudoers file must not be a symlink.' >&2; exit 5; }
+windowops_sudoers="$(mktemp /etc/sudoers.d/.windowops.XXXXXX)"
+printf '%s\n' 'windowops ALL=(root) NOPASSWD: /usr/bin/updater tui --window-only, /usr/bin/updater window pair --key-base64 *, /usr/local/bin/window capture-test *' > "$windowops_sudoers"
+chmod 0440 "$windowops_sudoers"
+visudo -cf "$windowops_sudoers" >/dev/null || { rm -f "$windowops_sudoers"; exit 5; }
+mv -f "$windowops_sudoers" /etc/sudoers.d/windowops
+visudo -c >/dev/null
 # "NP" is an invalid password hash: password login is impossible while
 # OpenSSH can still admit the one forced-command public key with UsePAM=no.
 usermod --password NP window

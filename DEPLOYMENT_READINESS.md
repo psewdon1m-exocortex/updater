@@ -1,5 +1,20 @@
 # updater deployment and recovery contract
 
+## 0.6.11 image retention and restricted Window operations
+
+Updater 0.6.11 adds a bounded Docker image cleanup operation on the private
+root operator socket. It preserves running images, the immediately previous
+deployment generation, protected job references and the two newest eligible
+images per registered repository. Cleanup requires a fresh preview and a
+separate confirmation. Previous immutable image references are retained outside
+bounded job history so rollback can verify or pull the exact historical image
+before changing the current deployment.
+
+The installer also provisions the unprivileged `windowops` account and a narrow
+sudoers rule for `updater tui --window-only`, Window pairing and bounded test
+capture. Existing credentials are preserved; a new account remains locked until
+an operator installs an SSH key or sets a password.
+
 ## 0.6.10 scoped Neptune unlink
 
 Updater 0.6.10 adds the authenticated service-owned Neptune unlink lifecycle.

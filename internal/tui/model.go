@@ -32,6 +32,15 @@ const (
 
 var componentNames = []string{"updater", "neptune", "gryphon", "wyvern", "window"}
 
+func windowComponentIndex() int {
+	for index, name := range componentNames {
+		if name == "window" {
+			return index
+		}
+	}
+	panic("Window operator component is missing")
+}
+
 type pollMsg struct{}
 type observedMsg struct{ err error }
 type snapshotMsg struct {
@@ -45,6 +54,7 @@ type replyMsg struct {
 	bots       []console.Bot
 	lines      []string
 	wyvernEdit *console.WyvernEditState
+	imagePlan  *console.ImagePlan
 	kind       string
 	err        error
 }
@@ -59,7 +69,7 @@ type Model struct {
 	backend                     console.Backend
 	ctx                         context.Context
 	width, height               int
-	noColor, demo               bool
+	noColor, demo, windowOnly   bool
 	screen                      screen
 	selected, cursor, offset    int
 	snapshot                    console.Snapshot
@@ -73,12 +83,21 @@ type Model struct {
 	activeJob                   *console.Job
 	botList                     []console.Bot
 	resultLines                 []string
+	imagePlan                   *console.ImagePlan
 	generation                  int
 	waitingRequest              string
 }
 
 func New(backend console.Backend, ctx context.Context, noColor, demo bool) Model {
 	return Model{backend: backend, ctx: ctx, width: 80, height: 24, noColor: noColor, demo: demo, screen: services, polling: true}
+}
+
+func NewWindowOnly(backend console.Backend, ctx context.Context, noColor bool) Model {
+	m := New(backend, ctx, noColor, false)
+	m.windowOnly = true
+	m.selected = windowComponentIndex()
+	m.screen = details
+	return m
 }
 
 func (m Model) Init() tea.Cmd { return tea.Batch(m.refresh(), tick()) }
@@ -114,10 +133,14 @@ func (m Model) menu() []menuItem {
 			items = append(items, menuItem{"Install Window on this host", "install"})
 		}
 		items = append(items, menuItem{"Operation history", "jobs"})
-		return append(items, menuItem{"Help / diagnostics", "help"}, menuItem{"Back to applications", "back"})
+		items = append(items, menuItem{"Help / diagnostics", "help"})
+		if !m.windowOnly {
+			items = append(items, menuItem{"Back to applications", "back"})
+		}
+		return items
 	}
 	if m.selected == 0 {
-		items = append(items, menuItem{"Set host Kernel machine connection", "set-kernel"})
+		items = append(items, menuItem{"Set host Kernel machine connection", "set-kernel"}, menuItem{"Review Docker image storage", "images"})
 	}
 	if m.selected < 3 {
 		if m.component().Installed {
@@ -223,6 +246,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		m.offset = 0
 		if msg.err != nil {
+			if msg.kind == "image-clean" || msg.kind == "images" {
+				m.imagePlan = nil
+			}
 			m.resultLines = []string{console.Text(msg.err.Error())}
 			if msg.kind == "action" {
 				m.resultLines = append(m.resultLines, "Check operation history before retrying.", "Request: "+m.waitingRequest)
@@ -252,11 +278,22 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.kind == "adapters" {
 			m.resultLines = msg.lines
 		}
+		if msg.imagePlan != nil {
+			m.imagePlan = msg.imagePlan
+			m.resultLines = imagePlanLines(*msg.imagePlan)
+		}
+		if msg.kind == "image-clean" {
+			m.imagePlan = nil
+			m.resultLines = msg.lines
+		}
 		if msg.wyvernEdit != nil {
 			return m.openWyvernForm(msg.wyvernEdit.Revision)
 		}
 		return m, nil
 	case tea.KeyMsg:
+		if m.windowOnly {
+			m.selected = windowComponentIndex()
+		}
 		// Bracketed paste is data, never navigation, confirmation or a command.
 		if msg.Paste {
 			if m.screen == form && m.cursor < len(m.fields) {
@@ -272,14 +309,15 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if key == "esc" {
-			if m.screen == services {
+			if m.screen == services || m.windowOnly && m.screen == details {
 				return m, tea.Quit
 			}
 			m.clearFields()
 			m.pending = console.Action{}
+			m.imagePlan = nil
 			previous := m.screen
 			m.screen = details
-			if previous == details {
+			if previous == details && !m.windowOnly {
 				m.screen = services
 			}
 			m.cursor = 0
@@ -295,6 +333,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch m.screen {
 		case services:
+			if m.windowOnly {
+				m.screen = details
+				return m, nil
+			}
 			if key == "up" {
 				m.selected = max(0, m.selected-1)
 			}
@@ -314,7 +356,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if key == "down" {
 				m.cursor = min(len(items)-1, m.cursor+1)
 			}
-			if key == "left" {
+			if key == "left" && !m.windowOnly {
 				m.screen = services
 				m.cursor = 0
 				m.offset = 0
@@ -352,7 +394,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return m.submit()
 			}
 		case result:
-			if key == "enter" && !m.working && m.candidate != nil && m.candidate.UpdateAvailable && m.connected {
+			if key == "enter" && !m.windowOnly && !m.working && m.imagePlan != nil && len(m.imagePlan.Candidates) > 0 && m.connected {
+				m.pending = console.Action{Component: "updater", Kind: "image-clean"}
+				m.screen, m.cursor, m.offset = confirm, 0, 0
+			} else if key == "enter" && !m.working && m.candidate != nil && m.candidate.UpdateAvailable && m.connected && (!m.windowOnly || m.candidate.Component == "window") {
 				m.pending = console.Action{Component: m.candidate.Component, Kind: "update", HeadID: m.candidate.HeadID, Version: m.candidate.Available}
 				m.screen = confirm
 				m.cursor = 0
@@ -402,6 +447,15 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) choose(action string) (tea.Model, tea.Cmd) {
+	if m.windowOnly {
+		m.selected = windowComponentIndex()
+		switch action {
+		case "refresh", "set-source", "check", "pair", "open", "revoke", "observe", "repair", "install", "jobs", "help":
+		default:
+			m.notice = "This operator session is limited to Window."
+			return m, nil
+		}
+	}
 	m.notice = ""
 	m.offset = 0
 	switch action {
@@ -430,6 +484,24 @@ func (m Model) choose(action string) (tea.Model, tea.Cmd) {
 	if m.working {
 		m.notice = "A request is still pending. Open operation history to inspect accepted work."
 		return m, nil
+	}
+	if action == "images" && m.component().ID == "updater" {
+		backend, ok := m.backend.(console.ImageBackend)
+		if !ok {
+			m.notice = "Docker image diagnostics are unavailable in this console"
+			return m, nil
+		}
+		m.generation++
+		generation := m.generation
+		m.working, m.screen = true, result
+		m.imagePlan, m.candidate, m.activeJob = nil, nil, nil
+		m.resultLines = []string{"Checking Docker images and rollback protection..."}
+		return m, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(m.ctx, 22*time.Second)
+			defer cancel()
+			plan, err := backend.ImagePlan(ctx)
+			return replyMsg{generation: generation, kind: "images", imagePlan: &plan, err: err}
+		}
 	}
 	if m.component().ID == "window" {
 		switch action {
@@ -736,9 +808,33 @@ func (m *Model) clearFields() {
 	m.fields = nil
 }
 func (m Model) submit() (tea.Model, tea.Cmd) {
+	if m.windowOnly && (m.pending.Component != "window" || !windowOperatorAction(m.pending.Kind)) {
+		m.notice = "This operator session is limited to Window."
+		return m, nil
+	}
 	if m.working || !m.connected {
 		m.notice = "Wait for the operator connection before submitting."
 		return m, nil
+	}
+	if m.pending.Kind == "image-clean" {
+		backend, ok := m.backend.(console.ImageBackend)
+		if !ok || m.imagePlan == nil {
+			m.notice = "Review a fresh Docker image plan before cleanup"
+			return m, nil
+		}
+		planID := m.imagePlan.ID
+		m.pending = console.Action{}
+		m.screen, m.cursor, m.offset = result, 0, 0
+		m.working = true
+		m.resultLines = []string{"Rechecking the reviewed image plan and removing one bounded batch..."}
+		m.generation++
+		generation := m.generation
+		return m, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(m.ctx, 50*time.Second)
+			defer cancel()
+			result, err := backend.CleanImages(ctx, planID)
+			return replyMsg{generation: generation, kind: "image-clean", lines: imageCleanLines(result), err: err}
+		}
 	}
 	bytes := make([]byte, 16)
 	if _, err := rand.Read(bytes); err != nil {
@@ -766,6 +862,14 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		action.BotToken, action.SetupCode = "", ""
 		return replyMsg{generation: generation, kind: "action", job: &job, err: err}
 	}
+}
+
+func windowOperatorAction(kind string) bool {
+	switch kind {
+	case "set-source", "pair", "open", "revoke", "repair", "install", "update":
+		return true
+	}
+	return false
 }
 
 func (m Model) visibleJobs() []console.Job {
@@ -870,6 +974,14 @@ func (d *Demo) Act(_ context.Context, a console.Action) (console.Job, error) {
 }
 func (d *Demo) Bots(context.Context) ([]console.Bot, error) {
 	return []console.Bot{{Alias: "example", Username: "example_bot", State: "ready"}}, nil
+}
+
+func (d *Demo) ImagePlan(context.Context) (console.ImagePlan, error) {
+	return console.ImagePlan{ID: strings.Repeat("0", 64), ObservedAt: time.Now().UTC(), OwnedImages: 3, ProtectedImages: 3, Candidates: []console.ImageItem{}}, nil
+}
+
+func (d *Demo) CleanImages(context.Context, string) (console.ImageCleanResult, error) {
+	return console.ImageCleanResult{}, nil
 }
 
 var _ console.Backend = (*Demo)(nil)

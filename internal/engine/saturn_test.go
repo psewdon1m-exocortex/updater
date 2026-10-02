@@ -24,6 +24,9 @@ func (r *saturnRunner) Run(_ context.Context, name string, args, _ []string, _ s
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, name+" "+strings.Join(args, " "))
+	if len(args) > 1 && args[0] == "image" && args[1] == "inspect" {
+		return []byte("sha256:" + strings.Repeat("a", 64)), nil
+	}
 	if len(args) > 0 && args[0] == "inspect" {
 		return []byte("ghcr.io/example/app@sha256:old"), nil
 	}

@@ -18,6 +18,41 @@ func loaded() Model {
 	next, _ := m.Update(snapshotMsg{snapshot: demo.snapshot})
 	return next.(Model)
 }
+
+func TestWindowOnlyOperatorCannotNavigateOrSubmitOtherComponents(t *testing.T) {
+	demo := NewDemo()
+	m := NewWindowOnly(demo, context.Background(), true)
+	next, _ := m.Update(snapshotMsg{snapshot: demo.snapshot})
+	m = next.(Model)
+	if m.screen != details || m.component().ID != "window" {
+		t.Fatal("restricted operator did not open Window directly")
+	}
+	for _, item := range m.menu() {
+		if item.action == "back" {
+			t.Fatal("restricted menu exposes other applications")
+		}
+	}
+	m = key(m, tea.KeyLeft)
+	if m.screen != details {
+		t.Fatal("left arrow escaped the Window section")
+	}
+	next, _ = m.choose("set-kernel")
+	m = next.(Model)
+	if m.screen != details || m.pending.Component != "" {
+		t.Fatal("restricted operator opened host Kernel configuration")
+	}
+	m.pending = console.Action{Component: "updater", Kind: "update"}
+	m.screen = confirm
+	next, command := m.submit()
+	m = next.(Model)
+	if command != nil || !strings.Contains(m.notice, "limited to Window") {
+		t.Fatal("restricted operator submitted a non-Window action")
+	}
+	m = key(m, tea.KeyEsc)
+	if m.screen != details || m.component().ID != "window" {
+		t.Fatal("escape left the Window section")
+	}
+}
 func send(m Model, msg tea.Msg) Model     { next, _ := m.Update(msg); return next.(Model) }
 func key(m Model, kind tea.KeyType) Model { return send(m, tea.KeyMsg{Type: kind}) }
 
@@ -166,6 +201,33 @@ func TestConfirmDefaultsToCancelAndPasteCannotSubmit(t *testing.T) {
 	m = send(next.(Model), command())
 	if m.activeJob == nil || !m.activeJob.Finished {
 		t.Fatal("did not show durable job receipt")
+	}
+}
+
+func TestImageCleanupNeedsFreshPlanAndExplicitConfirmation(t *testing.T) {
+	m := loaded()
+	m.screen = result
+	m.imagePlan = &console.ImagePlan{ID: strings.Repeat("a", 64), Candidates: []console.ImageItem{{ID: "sha256:" + strings.Repeat("b", 64)}}}
+	m = key(m, tea.KeyEnter)
+	if m.screen != confirm || m.pending.Kind != "image-clean" || m.cursor != 0 {
+		t.Fatal("reviewed image plan did not open a default-cancel confirmation")
+	}
+	m = key(m, tea.KeyEnter)
+	if m.working || m.screen != details {
+		t.Fatal("default image confirmation submitted cleanup")
+	}
+	m.screen = result
+	m.imagePlan = &console.ImagePlan{ID: strings.Repeat("a", 64), Candidates: []console.ImageItem{{ID: "sha256:" + strings.Repeat("b", 64)}}}
+	m = key(m, tea.KeyEnter)
+	m = key(m, tea.KeyDown)
+	next, command := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if command == nil || !m.working || m.waitingRequest != "" {
+		t.Fatal("explicit image confirmation did not submit a synchronous request")
+	}
+	m = send(m, command())
+	if m.imagePlan != nil || m.working {
+		t.Fatal("completed image cleanup left a reusable plan")
 	}
 }
 

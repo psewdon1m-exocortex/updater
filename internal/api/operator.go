@@ -18,6 +18,7 @@ import (
 	"updater/internal/component"
 	"updater/internal/config"
 	"updater/internal/console"
+	"updater/internal/imagecache"
 	"updater/internal/kernel"
 	"updater/internal/model"
 )
@@ -31,6 +32,32 @@ type operatorDispatchKey struct{}
 // service-mounted listener never exposes any of these operator routes.
 func (s Server) operatorHandler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/images/plan", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		defer cancel()
+		plan, err := s.imageCache().Preview(ctx)
+		if err != nil {
+			writeError(w, 503, err)
+			return
+		}
+		writeJSON(w, 200, plan)
+	})
+	mux.HandleFunc("POST /v1/images/clean", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			PlanID string `json:"plan_id"`
+		}
+		if !operatorDecode(w, r, &request) {
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+		defer cancel()
+		result, err := s.imageCache().Clean(ctx, request.PlanID)
+		if err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		writeJSON(w, 200, result)
+	})
 	mux.HandleFunc("GET /v1/wyvern/config", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
@@ -111,6 +138,13 @@ func (s Server) operatorHandler() http.Handler {
 	mux.HandleFunc("POST /v1/window/heartbeat", s.operatorWindowHeartbeat)
 	mux.HandleFunc("POST /v1/window/close", s.operatorWindowClose)
 	return withLocalHeaders(mux)
+}
+
+func (s Server) imageCache() imagecache.Cache {
+	if s.ImageCache != nil {
+		return *s.ImageCache
+	}
+	return imagecache.Cache{Runtime: s.Runtime, Store: s.Store}
 }
 
 func operatorDecode(w http.ResponseWriter, r *http.Request, target any) bool {

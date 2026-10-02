@@ -154,3 +154,15 @@ func (c *Client) Bots(ctx context.Context) ([]Bot, error) {
 	err := c.request(ctx, "GET", "/v1/bots", nil, &result)
 	return result.Bots, err
 }
+
+func (c *Client) ImagePlan(ctx context.Context) (ImagePlan, error) {
+	var plan ImagePlan
+	err := c.request(ctx, "GET", "/v1/images/plan", nil, &plan)
+	return plan, err
+}
+
+func (c *Client) CleanImages(ctx context.Context, planID string) (ImageCleanResult, error) {
+	var result ImageCleanResult
+	err := c.request(ctx, "POST", "/v1/images/clean", map[string]string{"plan_id": planID}, &result)
+	return result, err
+}

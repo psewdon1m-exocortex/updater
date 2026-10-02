@@ -57,6 +57,9 @@ func (m Model) View() string {
 		host = "local host"
 	}
 	header := " EXOCORTEX / UPDATER"
+	if m.windowOnly {
+		header = " EXOCORTEX / WINDOW"
+	}
 	if m.demo {
 		header += "  [DEMO]"
 	}
@@ -99,6 +102,9 @@ func (m Model) View() string {
 	output = append(output, strings.Repeat("-", width-1))
 	foot := "Up/Down select  Enter open  Esc back"
 	if m.screen == services {
+		foot = "Up/Down select  Enter open  Esc exit"
+	}
+	if m.windowOnly && m.screen == details {
 		foot = "Up/Down select  Enter open  Esc exit"
 	}
 	if m.screen == form {
@@ -258,7 +264,10 @@ func (m Model) rows() []row {
 	case confirm:
 		heading("CONFIRM / " + title(m.pending.Component))
 		add("Action: " + actionLabel(m.pending.Kind))
-		if m.pending.Component == "window" {
+		if m.pending.Kind == "image-clean" && m.imagePlan != nil {
+			add(fmt.Sprintf("Scope: %d reviewed Exocortex images; no volumes or other projects", len(m.imagePlan.Candidates)))
+			add("Inventory is checked again under the host operation lock before deletion.")
+		} else if m.pending.Component == "window" {
 			add("Scope: paired development PC; all Window diagnostic sources")
 		} else if m.pending.Component == "wyvern" {
 			add("Scope: all clients of the local Wyvern instance")
@@ -312,7 +321,9 @@ func (m Model) rows() []row {
 				add("Load and validate Kernel/Volt configuration. Invalid changes keep the last working snapshot.")
 			}
 		}
-		add("Accepted work continues if this terminal disconnects.")
+		if m.pending.Kind != "image-clean" {
+			add("Accepted work continues if this terminal disconnects.")
+		}
 		if m.demo {
 			add("DEMO: this only simulates the operation.")
 		}
@@ -419,6 +430,10 @@ func (m Model) rows() []row {
 				add("")
 			}
 		}
+		if m.windowOnly {
+			add("Run sudo /usr/bin/updater tui --window-only from the windowops SSH account. Esc closes this console.")
+			return rows
+		}
 		for _, line := range []string{
 			"Use Up/Down and Enter. Esc returns; Ctrl+C exits. Tab moves between form fields.",
 			"Refresh status observes local process state and the running API version. An active unit alone does not mean that its API is healthy.",
@@ -450,6 +465,8 @@ func actionLabel(kind string) string {
 		return "Set fallback source"
 	case "set-kernel":
 		return "Set host Kernel connection"
+	case "image-clean":
+		return "Clean reviewed Docker images"
 	case "install":
 		return "Install helper"
 	case "enroll":
