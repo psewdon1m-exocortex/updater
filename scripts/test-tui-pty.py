@@ -134,7 +134,7 @@ def main():
         terminal.expect("SERVICE APPLICATIONS")
         terminal.send(b"\x1b[B\r")  # Gryphon, initially absent.
         terminal.expect("Gryphon")
-        terminal.send(b"\x1b[B" * 4 + b"\r")
+        terminal.send(b"\x1b[B" * 6 + b"\r")
         terminal.expect("Bot alias")
         terminal.send(b"test-bot\r")
         secret = b"123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcd"
