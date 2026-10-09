@@ -155,8 +155,8 @@ func HostKernelToken(cfg HostConfig) (string, error) {
 		return "", err
 	}
 	owner, ok := info.Sys().(*syscall.Stat_t)
-	if !info.Mode().IsRegular() || !ok || owner.Uid != 0 || info.Mode().Perm()&0o037 != 0 {
-		return "", errors.New("Updater Kernel machine token file must be root-owned, regular and private")
+	if !info.Mode().IsRegular() || !ok || owner.Uid != uint32(os.Geteuid()) || info.Mode().Perm()&0o037 != 0 {
+		return "", errors.New("Updater Kernel machine token file must be owned by the Updater user, regular and private")
 	}
 	body, err := os.ReadFile(cfg.KernelTokenFile)
 	if err != nil {

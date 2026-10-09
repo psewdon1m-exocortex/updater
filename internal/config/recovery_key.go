@@ -39,8 +39,8 @@ func ReadRecoveryKey(filename, service string) (string, error) {
 		return "", err
 	}
 	owner, ok := info.Sys().(*syscall.Stat_t)
-	if !info.Mode().IsRegular() || !ok || owner.Uid != 0 || info.Mode().Perm()&0o077 != 0 || info.Size() > 4096 {
-		return "", errors.New("recovery key must be a private root-owned regular file")
+	if !info.Mode().IsRegular() || !ok || owner.Uid != uint32(os.Geteuid()) || info.Mode().Perm()&0o077 != 0 || info.Size() > 4096 {
+		return "", errors.New("recovery key must be a private regular file owned by the Updater user")
 	}
 	body := make([]byte, info.Size())
 	if _, err := file.ReadAt(body, 0); err != nil {
@@ -77,8 +77,8 @@ func ManagedRecoveryKey(runtime Runtime, service string, create bool) (string, e
 		return "", err
 	}
 	owner, ok := info.Sys().(*syscall.Stat_t)
-	if !info.IsDir() || !ok || owner.Uid != 0 || info.Mode().Perm()&0o077 != 0 {
-		return "", errors.New("recovery key directory must be private and root-owned")
+	if !info.IsDir() || !ok || owner.Uid != uint32(os.Geteuid()) || info.Mode().Perm()&0o077 != 0 {
+		return "", errors.New("recovery key directory must be private and owned by the Updater user")
 	}
 	random := make([]byte, 32)
 	if _, err = rand.Read(random); err != nil {

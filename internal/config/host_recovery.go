@@ -101,8 +101,8 @@ func RecoveryToken(configuration HostConfig, service string) (string, error) {
 		return "", err
 	}
 	owner, ok := info.Sys().(*syscall.Stat_t)
-	if !info.Mode().IsRegular() || !ok || owner.Uid != 0 || info.Mode().Perm()&0o037 != 0 {
-		return "", fmt.Errorf("%s recovery producer token file must be root-owned, regular and private", service)
+	if !info.Mode().IsRegular() || !ok || owner.Uid != uint32(os.Geteuid()) || info.Mode().Perm()&0o037 != 0 {
+		return "", fmt.Errorf("%s recovery producer token file must be owned by the Updater user, regular and private", service)
 	}
 	body, err := os.ReadFile(filename)
 	if err != nil {
