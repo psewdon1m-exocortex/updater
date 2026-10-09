@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.13 — 2026-10-09
+
+- Add scoped, remotely stored host-recovery archives for Updater, Neptune,
+  Gryphon and Wyvern, with independent managed recovery keys.
+- Resolve Saturn recovery storage through Updater's Kernel machine identity,
+  retaining an explicit operator-controlled fallback for outages.
+- Add root-operator and TUI flows for configuring storage, exporting keys,
+  creating archives and restoring scoped host state.
+
 ## 0.6.12 — 2026-10-02
 
 - Expose the restricted Window operator console through the concise

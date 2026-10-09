@@ -1,5 +1,15 @@
 # updater deployment and recovery contract
 
+## 0.6.13 scoped host recovery
+
+Updater 0.6.13 adds service-isolated remote recovery archives for Updater,
+Neptune, Gryphon and Wyvern. Saturn is resolved through Updater's own Kernel
+machine principal, while per-service producer credentials and managed recovery
+keys remain in private files owned by the Updater service user. The root
+operator API and TUI expose explicit configuration, archive, restore and key
+export workflows; existing passphrase archives remain restorable through the
+legacy path.
+
 ## 0.6.12 restricted Window flag
 
 Updater 0.6.12 exposes the restricted Window operator console as
