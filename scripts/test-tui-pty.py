@@ -173,7 +173,7 @@ def main():
     try:
         wyvern.expect("SERVICE APPLICATIONS")
         wyvern.expect("CONNECTED")
-        wyvern.send(b"\x1b[B" * 10 + b"\r")
+        wyvern.send(b"\x1b[B" * 3 + b"\r")
         wyvern.expect("Adapters and client bindings")
         wyvern.send(b"\x1b[B" * 8 + b"\r")
         wyvern.expect("CLIENT BINDINGS")
@@ -185,7 +185,7 @@ def main():
         wyvern.expect("all clients")
         wyvern.send(b"\r")
         wyvern.expect("Pause new requests (drain)")
-        wyvern.send(b"\x1b[B" * 3 + b"\r")
+        wyvern.send(b"\x1b[B" * 10 + b"\r")
         wyvern.expect("CONFIRM / Wyvern")
         wyvern.send(b"\x1b[B\r")
         wyvern.expect("State: COMPLETED")
