@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -103,5 +104,60 @@ func TestRegistriesAreLocalToEachVPS(t *testing.T) {
 	}
 	if _, ok := two.Heads["kernel"]; ok {
 		t.Fatal("the Perimetr VPS registry leaked a Kernel VPS profile")
+	}
+}
+
+func TestSaveRecoveryStorageCreatesFourPrivateTokenFiles(t *testing.T) {
+	directory := t.TempDir()
+	runtime := Runtime{HostConfigPath: filepath.Join(directory, "updater-host.json")}
+	identities := map[string]RecoveryIdentity{
+		"updater": {Slug: "updater-server", Token: strings.Repeat("u", 43)},
+		"neptune": {Slug: "neptune-server", Token: strings.Repeat("n", 43)},
+		"gryphon": {Slug: "gryphon-server", Token: strings.Repeat("g", 43)},
+		"wyvern":  {Slug: "wyvern-server", Token: strings.Repeat("w", 43)},
+	}
+	if err := SaveRecoveryStorage(runtime, "https://saturn.example", identities); err != nil {
+		t.Fatal(err)
+	}
+	configuration, err := LoadHost(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configuration.RecoveryGatewayURL != "https://saturn.example" || len(configuration.RecoveryTokenFiles) != 4 || len(configuration.RecoverySlugs) != 4 {
+		t.Fatalf("recovery storage configuration was not persisted: %#v", configuration)
+	}
+	for service, filename := range configuration.RecoveryTokenFiles {
+		info, err := os.Stat(filename)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+			t.Fatalf("%s token is not private: %v %#o", service, err, info.Mode().Perm())
+		}
+		body, _ := os.ReadFile(filename)
+		if strings.TrimSpace(string(body)) != identities[service].Token || configuration.RecoverySlugs[service] != identities[service].Slug {
+			t.Fatal("stored recovery token differs", service)
+		}
+	}
+	if err := SaveRecoveryStorage(runtime, "http://saturn.example", identities); err == nil {
+		t.Fatal("insecure recovery Gateway URL was accepted")
+	}
+}
+
+func TestSaveRecoveryStorageMergesIndependentServiceIdentities(t *testing.T) {
+	directory := t.TempDir()
+	runtime := Runtime{HostConfigPath: filepath.Join(directory, "updater-host.json")}
+	for _, service := range []string{"updater", "neptune"} {
+		identity := RecoveryIdentity{Slug: service + "-edge-1", Token: strings.Repeat(service[:1], 43)}
+		if err := SaveRecoveryStorage(runtime, "https://saturn.example", map[string]RecoveryIdentity{service: identity}); err != nil {
+			t.Fatal(service, err)
+		}
+	}
+	configuration, err := LoadHost(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configuration.RecoveryTokenFiles) != 2 || configuration.RecoverySlugs["updater"] != "updater-edge-1" || configuration.RecoverySlugs["neptune"] != "neptune-edge-1" {
+		t.Fatalf("independent recovery identities were not merged: %#v", configuration)
+	}
+	if err := SaveRecoveryStorage(runtime, "https://other.example", map[string]RecoveryIdentity{"gryphon": {Slug: "gryphon-edge-1", Token: strings.Repeat("g", 43)}}); err == nil {
+		t.Fatal("mixed recovery Gateways were accepted")
 	}
 }

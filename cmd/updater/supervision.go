@@ -17,7 +17,7 @@ import (
 func activeSupervisor(job model.Job) bool {
 	unit := ""
 	switch job.Service {
-	case "host-recovery":
+	case "host-recovery", "host-recovery-export", "host-recovery-restore":
 		unit = "exocortex-host-recovery.service"
 	case "updater-self-update":
 		unit = "exocortex-updater-self-update.service"
@@ -32,7 +32,7 @@ func activeSupervisor(job model.Job) bool {
 func monitorSupervisors(store *state.Store) {
 	for range time.NewTicker(30 * time.Second).C {
 		_ = store.ReconcileInterrupted(func(job model.Job) bool {
-			return (job.Service != "host-recovery" && job.Service != "updater-self-update") || time.Since(job.CreatedAt) < 30*time.Second || activeSupervisor(job)
+			return (job.Service != "host-recovery" && job.Service != "host-recovery-export" && job.Service != "host-recovery-restore" && job.Service != "updater-self-update") || time.Since(job.CreatedAt) < 30*time.Second || activeSupervisor(job)
 		})
 	}
 }
@@ -68,7 +68,7 @@ func runSupervised(runtime config.Runtime, id, kind string) (result error) {
 	defer release()
 	directory := filepath.Join(runtime.StateDir, "recovery-jobs", job.ID)
 	defer func() {
-		if kind == "host-recovery" {
+		if kind == "host-recovery" || kind == "host-recovery-export" || kind == "host-recovery-restore" {
 			_ = os.RemoveAll(directory)
 		}
 		now := time.Now().UTC()
@@ -85,7 +85,7 @@ func runSupervised(runtime config.Runtime, id, kind string) (result error) {
 		}
 	}()
 	job.State = "INSTALLING"
-	if kind == "host-recovery" {
+	if kind == "host-recovery" || kind == "host-recovery-restore" {
 		job.State = "RESTORING"
 	}
 	job.UpdatedAt = time.Now().UTC()
@@ -94,6 +94,47 @@ func runSupervised(runtime config.Runtime, id, kind string) (result error) {
 	}
 	if kind == "updater-self-update" {
 		return selfupdate.RunVersion(runtime, job.HeadID, job.Version)
+	}
+	if kind == "host-recovery-export" {
+		key, err := os.ReadFile(filepath.Join(directory, "key"))
+		if err != nil {
+			return err
+		}
+		defer clear(key)
+		scope, scopeErr := os.ReadFile(filepath.Join(directory, "scope"))
+		legacySet := errors.Is(scopeErr, os.ErrNotExist)
+		if scopeErr != nil && !legacySet {
+			return scopeErr
+		}
+		if err = os.RemoveAll(directory); err != nil {
+			return err
+		}
+		if legacySet {
+			archives, exportErr := hostrecovery.ExportScopes(string(key))
+			clear(key)
+			if exportErr != nil {
+				return exportErr
+			}
+			defer func() {
+				for index := range archives {
+					clear(archives[index].Bytes)
+				}
+			}()
+			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+			defer cancel()
+			_, exportErr = hostrecovery.PublishScopes(ctx, runtime, archives, job.ID, job.CreatedAt)
+			return exportErr
+		}
+		archive, err := hostrecovery.ExportScope(string(key), string(scope))
+		clear(key)
+		if err != nil {
+			return err
+		}
+		defer clear(archive.Bytes)
+		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+		defer cancel()
+		_, err = hostrecovery.PublishScope(ctx, runtime, archive, job.ID, job.CreatedAt)
+		return err
 	}
 	info, err := os.Stat(filepath.Join(directory, "archive"))
 	if err != nil {
@@ -112,8 +153,18 @@ func runSupervised(runtime config.Runtime, id, kind string) (result error) {
 		return err
 	}
 	defer clear(key)
+	scope := []byte(nil)
+	if kind == "host-recovery-restore" {
+		scope, err = os.ReadFile(filepath.Join(directory, "scope"))
+		if err != nil {
+			return err
+		}
+	}
 	if err = os.RemoveAll(directory); err != nil {
 		return err
+	}
+	if kind == "host-recovery-restore" {
+		return hostrecovery.RestoreScope(archive, string(key), string(scope))
 	}
 	return hostrecovery.Restore(archive, string(key))
 }

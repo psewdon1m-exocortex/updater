@@ -125,6 +125,7 @@ type NeptuneEnrollmentResult struct {
 }
 
 type saturnEnrollment struct {
+	ArchivePipeline      *bool  `json:"archivePipeline"`
 	Token                string `json:"token"`
 	Slug                 string `json:"slug"`
 	NamespaceSlug        string `json:"namespaceSlug"`
@@ -253,6 +254,7 @@ func EnrollNeptuneProject(runtimeConfig config.Runtime, headID, projectID, expor
 	}
 	projectEnv := filepath.Join(projectsDir, projectID+".env")
 	content := fmt.Sprintf("NEPTUNE_BACKUP_EXPORT_URL=%s\nNEPTUNE_CONTROL_TOKEN_FILE=%s\nNEPTUNE_EXPORT_TOKEN_FILE=%s\nNEPTUNE_SATURN_TOKEN_FILE=%s\nNEPTUNE_SATURN_SLUG=%s\nNEPTUNE_BACKUP_ENABLED=false\nNEPTUNE_BACKUP_INTERVAL_HOURS=24\n", exportURL, controlPath, exportPath, saturnPath, redeemed.Slug)
+	content += fmt.Sprintf("NEPTUNE_BACKUP_AVAILABLE=%t\n", redeemed.ArchivePipeline == nil || *redeemed.ArchivePipeline)
 	if redeemed.MirrorRoot != "" {
 		content += fmt.Sprintf("NEPTUNE_MIRROR_ROOT=%s\nNEPTUNE_MIRROR_TOKEN_FILE=%s\nNEPTUNE_MIRROR_EXPORT_URL=%s\nNEPTUNE_MIRROR_MODE=%s\nNEPTUNE_MIRROR_TARGET_FILENAME=%s\nNEPTUNE_MIRROR_ENABLED=false\nNEPTUNE_MIRROR_INTERVAL_MINUTES=5\n", redeemed.MirrorRoot, mirrorPath, strings.TrimSuffix(exportURL, "/backup")+"/mirror", redeemed.MirrorMode, redeemed.MirrorTargetFilename)
 	}
@@ -318,15 +320,15 @@ func EnrollNeptuneProject(runtimeConfig config.Runtime, headID, projectID, expor
 	}
 	healthContext, cancelHealth := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelHealth()
-	if err := waitNeptuneProject(healthContext, projectID, controlToken); err != nil {
+	if err := waitNeptuneProject(healthContext, projectID, controlToken, redeemed.MirrorRoot != ""); err != nil {
 		return NeptuneEnrollmentResult{}, err
 	}
 	return NeptuneEnrollmentResult{ProjectID: projectID, ProducerSlug: redeemed.Slug, NamespaceSlug: redeemed.NamespaceSlug, DeploymentID: redeemed.DeploymentID, SocketGID: gid, MirrorRoot: redeemed.MirrorRoot}, nil
 }
 
-func waitNeptuneProject(ctx context.Context, projectID, token string) error {
+func waitNeptuneProject(ctx context.Context, projectID, token string, mirrorRequired ...bool) error {
 	for {
-		if err := checkNeptuneProject(ctx, projectID, token); err == nil {
+		if err := checkNeptuneProject(ctx, projectID, token, mirrorRequired...); err == nil {
 			return nil
 		}
 		select {
@@ -337,7 +339,7 @@ func waitNeptuneProject(ctx context.Context, projectID, token string) error {
 	}
 }
 
-func checkNeptuneProject(ctx context.Context, projectID, token string) error {
+func checkNeptuneProject(ctx context.Context, projectID, token string, mirrorRequired ...bool) error {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "unix", neptuneSocket)
 	}}
@@ -358,7 +360,7 @@ func checkNeptuneProject(ctx context.Context, projectID, token string) error {
 	if response.StatusCode != 200 {
 		return errors.New("Neptune project authentication or readiness failed")
 	}
-	if projectID == "mastermind" {
+	if projectID == "mastermind" && (len(mirrorRequired) == 0 || mirrorRequired[0]) {
 		var observed struct {
 			Project struct {
 				Mirror struct {
@@ -388,6 +390,15 @@ func validateNeptuneEnrollmentProfile(projectID string, redeemed saturnEnrollmen
 	}
 	if redeemed.MirrorRoot != "" && redeemed.MirrorRoot != projectID {
 		return fmt.Errorf("Saturn setup code contains mirror root %q, expected %q", redeemed.MirrorRoot, projectID)
+	}
+	if redeemed.ArchivePipeline != nil && !*redeemed.ArchivePipeline && redeemed.MirrorRoot == "" {
+		return errors.New("At least one pipeline is required")
+	}
+	if redeemed.MirrorRoot == "" {
+		if redeemed.MirrorToken != "" || redeemed.ReaderToken != "" || redeemed.MirrorMode != "" || redeemed.ReaderRoot != "" || redeemed.ReaderCapability != "" || redeemed.MirrorTargetFilename != "" {
+			return errors.New("Archive-only profile must not contain mirror or reader credentials")
+		}
+		return nil
 	}
 	if projectID == "volt" {
 		if redeemed.MirrorRoot != "volt" || redeemed.MirrorMode != "single-file" || redeemed.MirrorTargetFilename != "personal.volt" || redeemed.MirrorToken == "" {

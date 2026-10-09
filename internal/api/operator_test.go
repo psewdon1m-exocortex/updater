@@ -161,6 +161,78 @@ func TestOperatorUpdaterUpdateRetainsHostReleasePath(t *testing.T) {
 	}
 }
 
+func TestRecoveryStorageConfigurationExistsOnlyOnRootOperatorAPI(t *testing.T) {
+	s := operatorFixture(t)
+	s.RecoveryEnroll = func(_ context.Context, _ string, codes map[string]string) (map[string]config.RecoveryIdentity, error) {
+		identities := map[string]config.RecoveryIdentity{}
+		if len(codes) != 1 {
+			t.Fatal("operator combined independent recovery setup codes", codes)
+		}
+		for service, code := range codes {
+			if len(code) != 32 {
+				t.Fatal("operator did not pass the bounded setup code", service)
+			}
+			identities[service] = config.RecoveryIdentity{Slug: service + "-server", Token: strings.Repeat(service[:1], 43)}
+		}
+		return identities, nil
+	}
+	bodies := []string{
+		`{"component":"updater","kind":"recovery-configure","request_id":"tui-recovery-updater-123456","recovery":{"gateway_url":"https://saturn.example","service":"updater","enrollment_codes":{"updater":"uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"}}}`,
+		`{"component":"neptune","kind":"recovery-configure","request_id":"tui-recovery-neptune-123456","recovery":{"gateway_url":"https://saturn.example","service":"neptune","enrollment_codes":{"neptune":"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"}}}`,
+	}
+	for _, body := range bodies {
+		response := httptest.NewRecorder()
+		s.operatorHandler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "http://updater.local/v1/actions", strings.NewReader(body)))
+		if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "uuuuuu") || strings.Contains(response.Body.String(), "nnnnnn") {
+			t.Fatalf("root recovery configuration failed or disclosed a token: %d %s", response.Code, response.Body.String())
+		}
+	}
+	snapshot := s.operatorSnapshot(context.Background())
+	if !snapshot.RecoveryConfigured || snapshot.RecoveryGatewayURL != "https://saturn.example" || len(snapshot.RecoveryServices) != 2 {
+		t.Fatalf("recovery configuration is not observable without secrets: %+v", snapshot)
+	}
+	for _, service := range []string{"updater", "neptune"} {
+		info, err := os.Stat(filepath.Join(filepath.Dir(config.HostConfigFile(s.Runtime)), "recovery-tokens", service+".token"))
+		if err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("private %s token file is missing: %v", service, err)
+		}
+	}
+	serviceResponse := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "http://updater.local/v1/actions", strings.NewReader(bodies[0]))
+	request.Header.Set("X-Updater-Token", "never-disclose-control")
+	s.Handler().ServeHTTP(serviceResponse, request)
+	if serviceResponse.Code != http.StatusNotFound {
+		t.Fatalf("root recovery action leaked to service listener: %d", serviceResponse.Code)
+	}
+}
+
+func TestRecoveryKeyExportNeverReturnsTheKeyAndIsPrivateToRoot(t *testing.T) {
+	s := operatorFixture(t)
+	destination := filepath.Join(t.TempDir(), "offline-updater-key.json")
+	body, _ := json.Marshal(map[string]any{"component": "updater", "kind": "recovery-key-export", "request_id": "tui-key-export-123456", "recovery": map[string]string{"service": "updater", "key_path": destination}})
+	response := httptest.NewRecorder()
+	s.operatorHandler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "http://updater.local/v1/actions", strings.NewReader(string(body))))
+	if response.Code != http.StatusOK {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	key, err := config.ManagedRecoveryKey(s.Runtime, "updater", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(response.Body.String(), key) {
+		t.Fatal("API disclosed the recovery key")
+	}
+	exported, err := config.ReadRecoveryKey(destination, "updater")
+	if err != nil || exported != key {
+		t.Fatal("private export does not contain the service key", err)
+	}
+	serviceResponse := httptest.NewRecorder()
+	s.Handler().ServeHTTP(serviceResponse, httptest.NewRequest(http.MethodPost, "http://updater.local/v1/actions", strings.NewReader(string(body))))
+	if serviceResponse.Code == http.StatusOK || serviceResponse.Code == http.StatusAccepted {
+		t.Fatal("service API exported a host key")
+	}
+}
+
 func TestOperatorLifecycleRetryReturnsExistingJobWithoutMutation(t *testing.T) {
 	s := operatorFixture(t)
 	now := time.Now().UTC()

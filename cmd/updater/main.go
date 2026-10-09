@@ -192,7 +192,13 @@ func main() {
 		if len(os.Args) != 3 {
 			fatal("host recovery job ID is required")
 		}
-		exitIf(runSupervised(runtime, os.Args[2], "host-recovery"))
+		store, err := state.New(runtime.StateDir)
+		exitIf(err)
+		job, ok := store.Get(os.Args[2])
+		if !ok || (job.Service != "host-recovery" && job.Service != "host-recovery-export" && job.Service != "host-recovery-restore") {
+			fatal("invalid host recovery job")
+		}
+		exitIf(runSupervised(runtime, os.Args[2], job.Service))
 	case "update":
 		headID := ""
 		if len(os.Args) == 4 && os.Args[2] == "--head" {

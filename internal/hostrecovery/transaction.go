@@ -69,18 +69,18 @@ func RecoverInterrupted(root string) error {
 		return errors.New("invalid recovery journal")
 	}
 	var plan []transactionRoot
-	if json.Unmarshal(body, &plan) != nil || len(plan) < 6 || len(plan) > len(roots) {
+	if json.Unmarshal(body, &plan) != nil || len(plan) < 1 || len(plan) > len(roots) {
 		return errors.New("invalid recovery journal")
 	}
 	lastIndex := -1
-	for index, item := range plan {
+	for _, item := range plan {
 		position := -1
 		for i, value := range roots {
 			if value == item.Root {
 				position = i
 			}
 		}
-		if position <= lastIndex || index < 6 && item.Root != roots[index] {
+		if position <= lastIndex {
 			return errors.New("invalid recovery journal order")
 		}
 		lastIndex = position
@@ -124,19 +124,68 @@ func RecoverInterrupted(root string) error {
 // Apply stages and fsyncs every file before mutation. Previous directories are
 // retained until verification; the journal enables automatic restart recovery.
 func Apply(root string, entries []Entry, verify func() error) error {
+	return applyRoots(root, entries, roots, verify)
+}
+
+// ApplyScoped is the service-isolated form of Apply. It deliberately excludes
+// every other service root from both staging and the durable rollback journal.
+func ApplyScoped(root string, entries []Entry, scope string, verify func() error) error {
+	selected, ok := scopedRoots[scope]
+	if !ok {
+		return errors.New("unknown helper recovery scope")
+	}
+	return applyRoots(root, entries, selected, verify)
+}
+
+func selectedRoot(name string, selected []string) bool {
+	for _, candidate := range selected {
+		if strings.HasPrefix(name, candidate+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func validateSelectedRoots(selected []string) error {
+	if len(selected) == 0 || len(selected) > len(roots) {
+		return errors.New("invalid recovery transaction roots")
+	}
+	last := -1
+	for _, selectedRoot := range selected {
+		position := -1
+		for index, candidate := range roots {
+			if candidate == selectedRoot {
+				position = index
+			}
+		}
+		if position <= last {
+			return errors.New("invalid recovery transaction root order")
+		}
+		last = position
+	}
+	return nil
+}
+
+func applyRoots(root string, entries []Entry, selected []string, verify func() error) error {
 	if len(entries) == 0 {
 		return errors.New("empty helper recovery is not allowed")
+	}
+	if err := validateSelectedRoots(selected); err != nil {
+		return err
 	}
 	if err := RecoverInterrupted(root); err != nil {
 		return err
 	}
-	if _, err := Collect(root); err != nil {
+	if _, err := collectRoots(root, selected); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	total := 0
 	for _, entry := range entries {
-		if _, err := rooted(root, entry.Name); err != nil {
+		if _, err := rooted(root, entry.Name); err != nil || !selectedRoot(entry.Name, selected) {
+			if err == nil {
+				err = errors.New("recovery entry is outside selected service roots")
+			}
 			return err
 		}
 		if err := validateData(entry); err != nil {
@@ -149,17 +198,23 @@ func Apply(root string, entries []Entry, verify func() error) error {
 		seen[entry.Name] = true
 	}
 	plan := []transactionRoot{}
-	for index, relative := range roots {
-		if index >= 6 {
-			included := false
-			for _, entry := range entries {
-				if strings.HasPrefix(entry.Name, relative+"/") {
-					included = true
+	for _, relative := range selected {
+		included := false
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name, relative+"/") {
+				included = true
+			}
+		}
+		// Older combined archives have no Wyvern state and must preserve a
+		// separately installed gateway rather than erase its current identities.
+		if len(selected) == len(roots) && !included {
+			position := -1
+			for index, candidate := range roots {
+				if candidate == relative {
+					position = index
 				}
 			}
-			// Older archives have no Wyvern state and must preserve a separately
-			// installed gateway rather than erase its current identities.
-			if !included {
+			if position >= 6 {
 				continue
 			}
 		}

@@ -51,3 +51,28 @@ func TestEnrollmentUsesExistingCodeAlphabetAndLoopbackContract(t *testing.T) {
 		}
 	}
 }
+
+func TestScopedRecoveryActionsAreRootOperatorOnlyAndFullySpecified(t *testing.T) {
+	updaterCode := map[string]string{"updater": strings.Repeat("u", 32)}
+	for _, action := range []Action{
+		{Component: "updater", Kind: "recovery-configure", Recovery: &RecoveryInput{GatewayURL: "https://saturn.example", Service: "updater", EnrollmentCodes: updaterCode}},
+		{Component: "neptune", Kind: "recovery-export", Recovery: &RecoveryInput{Service: "neptune", Confirmation: "CREATE NEPTUNE RECOVERY"}},
+		{Component: "gryphon", Kind: "recovery-restore", Recovery: &RecoveryInput{ArchivePath: "/root/recovery/gryphon.exorecovery", Service: "gryphon", Passphrase: "sixteen-byte-passphrase", Confirmation: "RESTORE GRYPHON"}},
+	} {
+		if err := ValidateAction(action); err != nil {
+			t.Fatalf("valid recovery action rejected: %s: %v", action.Kind, err)
+		}
+	}
+	invalid := Action{Component: "gryphon", Kind: "recovery-restore", HeadID: "saturn", Recovery: &RecoveryInput{ArchivePath: "/tmp/gryphon.exorecovery", Service: "gryphon", Passphrase: "sixteen-byte-passphrase", Confirmation: "RESTORE GRYPHON"}}
+	if err := ValidateAction(invalid); err == nil {
+		t.Fatal("head-scoped recovery action was accepted")
+	}
+	invalid = Action{Component: "updater", Kind: "recovery-configure", Recovery: &RecoveryInput{GatewayURL: "http://saturn.example", Service: "updater", EnrollmentCodes: updaterCode}}
+	if err := ValidateAction(invalid); err == nil {
+		t.Fatal("insecure recovery Gateway was accepted")
+	}
+	invalid = Action{Component: "updater", Kind: "recovery-export", Recovery: &RecoveryInput{Service: "updater", Passphrase: "sixteen-byte-passphrase", Confirmation: "CREATE"}}
+	if err := ValidateAction(invalid); err == nil {
+		t.Fatal("recovery export without exact confirmation was accepted")
+	}
+}

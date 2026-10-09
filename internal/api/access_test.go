@@ -13,7 +13,7 @@ import (
 	"updater/internal/state"
 )
 
-func TestJobAndHostRecoveryStayInsideHeadBoundary(t *testing.T) {
+func TestJobsAndPrivilegedOperationsStayInsideHeadBoundary(t *testing.T) {
 	root := t.TempDir()
 	runtime := config.Runtime{StateDir: root, RegistryPath: filepath.Join(root, "heads.json")}
 	for _, id := range []string{"kernel", "saturn"} {
@@ -49,7 +49,7 @@ func TestJobAndHostRecoveryStayInsideHeadBoundary(t *testing.T) {
 		{"POST", "/v2/components/wyvern/updates", "kernel-token", `{"head_id":"kernel","version":"1.2.3","request_id":"tui-request-123456"}`, 403},
 		{"POST", "/v2/components/updater/updates", "kernel-token", `{"head_id":"kernel","version":"1.2.3","request_id":"tui-request-123456"}`, 403},
 		{"POST", "/v1/lifecycle/updater-self-update", "kernel-token", `{"head_id":"kernel"}`, 403},
-		{"POST", "/v1/host-recovery/export", "saturn-token", `{"head_id":"saturn","passphrase":"synthetic recovery password"}`, 403},
+		{"POST", "/v1/host-recovery/export", "saturn-token", `{"head_id":"saturn","passphrase":"synthetic recovery password"}`, 404},
 	} {
 		request := httptest.NewRequest(item.method, "http://updater.local"+item.path, strings.NewReader(item.body))
 		request.Header.Set("X-Updater-Token", item.token)

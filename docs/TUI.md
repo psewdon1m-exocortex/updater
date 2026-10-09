@@ -20,7 +20,7 @@ service-agent ownership and update-verification contracts remain authoritative.
 | 00 | Existing working-tree changes and protocol 2 are the baseline; implementation, tests and limitations are recorded here. |
 | 01 | Terminal-specific layout, arrows/Enter/Esc/Tab, narrow viewport, text status and safe input. The terminal selects the font. |
 | 02 | Bounded, sanitized status and job summaries. Credentials never enter terminal history or job output. Existing job retention remains in force. |
-| 03 | No new authoritative state or backup format. Jobs use the existing durable store; setup codes and bot tokens remain memory-only input. |
+| 03 | Recovery adds a versioned, service-bound encrypted archive format. Every installed host service has an independent one-time Saturn setup code and Gateway namespace; new archives use a generated persistent per-service key, exported to a private file for off-host recovery. |
 | 04 | Included in the existing Updater binary and installer; a separate private operator socket is added to the systemd runtime directories. No public listener. |
 | 05 | Existing signed helper installation/update paths, exact version checks, host mutation lock and durable jobs are reused. No head-service update/restore UI. |
 | 06 | Targeted API/security/UI tests, complete Go checks, build and PTY exercise; no push or release is performed. |
@@ -131,7 +131,7 @@ report is generated after committing and is repeated by CI for the pushed SHA.
 
 | Required area | Result and evidence |
 | --- | --- |
-| Backup and restore | PASS: the UI adds no archive/state schema or backup action. Lifecycle request IDs use existing durable job metadata. Existing state, host-recovery and engine recovery tests remain in the full suite. |
+| Backup and restore | PASS: the root UI configures and creates each encrypted service-scoped archive independently, Gateway tests assert the selected `backups/<service>` boundary, cross-scope archives are rejected, and transactional tests prove restoring one scope preserves every neighboring service. |
 | Service update | PASS for this branch push: existing typed install/update, signed artifact, version/health and rollback contracts are exercised by the full suite. The console adds no release format. Full live release qualification is not claimed. |
 | Operator documentation | PASS: the built-in Help view covers actions, prerequisites, credentials, disconnect and recovery; terminal render tests exercise all screens, including Help. |
 | Technical documentation | PASS: Updater README, deployment readiness and this document describe the CLI, socket, limits and test commands. The workspace README already records the new entry point. |
@@ -143,10 +143,10 @@ report is generated after committing and is repeated by CI for the pushed SHA.
 
 | Component | Console actions |
 | --- | --- |
-| Updater | Observe process/API/version, configure its own Kernel machine connection and fallback repository, check and confirm an exact available update with zero heads. |
-| Neptune | Observe status, install, enroll a registered service with a Saturn setup code and local export URL, check and confirm updates. |
-| Gryphon | Observe status, install, list adapters, register an adapter with masked Telegram provider token input, issue its one-time owner `/link CODE`, check and confirm updates; no service selection for these actions. |
-| Wyvern | Observe runtime/configuration/drain state; install from its host release source when absent without a service; connect Kernel with the host-bound machine credential; edit Google Adapters/profiles and keys; grant/revoke clients; check/update the shared signed component without selecting a service; use the separate **Link registered service** action to select a consumer and provision its scoped client; reload, pause/resume and inspect retained host-operation history. |
+| Updater | Observe process/API/version, configure its own Kernel machine connection and fallback repository, independently enroll/export/restore Updater recovery, and check/confirm an exact available update with zero heads. |
+| Neptune | Observe status, install, enroll a registered service with a Saturn setup code and local export URL, independently enroll/export/restore Neptune recovery, check and confirm updates. |
+| Gryphon | Observe status, install, independently enroll/export/restore Gryphon recovery, list adapters, register a bot and check/confirm updates. |
+| Wyvern | Observe runtime/configuration/drain state; install independently, enroll/export/restore Wyvern recovery, connect Kernel, manage Adapters/profiles and clients, and inspect retained host-operation history. |
 
 Updater, Neptune, Gryphon and Wyvern checks and host installations use Updater's
 own authenticated Kernel Register connection first. If it is unavailable, the
@@ -158,6 +158,23 @@ Accepted operations appear in retained job history.
 The console reconnects after daemon loss and looks up uncertain requests by
 their request ID; it does not automatically resubmit mutations. Diagnostic
 instructions remain available when the operator API is unavailable.
+
+### Scoped host recovery workflow
+
+1. In Saturn **Synchronization → Add pipeline**, choose the exact installed host
+   service and create its identity. Repeat only for the other services actually
+   present on this server, using the same stable Server ID when appropriate.
+2. In `sudo updater tui`, open that component and choose **Configure … recovery
+   storage**. Enter the component's setup code; Saturn's origin is resolved from Updater's Kernel Register. Updater
+   verifies its namespace and stores its token in an independent mode-`0600` file.
+3. Export the generated key with **Export recovery key to private file**, and keep the 0600 file outside this host. Choose **Create … recovery archive** and type the displayed service-specific confirmation. No password is entered. The
+   job quiesces only that service and requires matching size, SHA-256 and a
+   receipt under its expected top-level folder.
+4. For restore, download exactly one `.exorecovery` file through Saturn, copy it
+   to a root-readable path on the target host, install the matching trusted
+   service, then choose that component's **Restore … recovery archive**. The TUI rejects
+   a cross-service header before staging and the transaction cannot replace any
+   neighboring service roots.
 
 The private API has `GET /v1/overview`, `GET /v1/bots`, `GET /v1/wyvern`,
 `POST /v1/check` and `POST /v1/actions`. Its default socket is
@@ -190,3 +207,5 @@ install the matching daemon binary and systemd unit through the existing
 Updater release path, open an SSH PTY, and run `sudo updater tui`. The daemon
 provides the private socket; starting the UI alone does not upgrade an older
 daemon. Add `--no-color` for monochrome rendering.
+
+Saturn origin resolution uses Updater’s own Kernel Register by default. The normal recovery registration form contains only the service’s setup code. The separate **Advanced: recovery Saturn origin override** action accepts an explicit HTTPS origin. A saved origin is used only when Kernel is unavailable, never after an authorization denial or invalid reachable Register. Restore accepts a key file (empty means this host’s key); old scoped archives use the separate legacy passphrase restore action.

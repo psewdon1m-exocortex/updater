@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -22,13 +23,14 @@ import (
 )
 
 type Server struct {
-	Version    string
-	Runtime    config.Runtime
-	Store      *state.Store
-	Engine     *engine.Engine
-	ImageCache *imagecache.Cache
-	OnReady    func()
-	Prepare    func() error
+	Version        string
+	Runtime        config.Runtime
+	Store          *state.Store
+	Engine         *engine.Engine
+	ImageCache     *imagecache.Cache
+	OnReady        func()
+	Prepare        func() error
+	RecoveryEnroll func(context.Context, string, map[string]string) (map[string]config.RecoveryIdentity, error)
 	// Host-owned operator transport. Never derived from service request fields.
 	WyvernSocket  string
 	WyvernManager *component.WyvernManager
@@ -39,7 +41,6 @@ func (s Server) Handler() http.Handler {
 	s.protocol(mux)
 	s.componentUpdates(mux)
 	s.lifecycle(mux)
-	s.recovery(mux)
 	s.backupSpools(mux)
 	s.mastermind(mux)
 	mux.HandleFunc("POST /v1/releases/check", func(w http.ResponseWriter, r *http.Request) {

@@ -59,7 +59,7 @@ func ResumeInterruptedHost() error {
 			return errors.New("invalid helper restart journal")
 		}
 		for _, unit := range saved {
-			if unit != "neptune.service" && unit != "gryphon.service" && unit != "wyvern.service" {
+			if unit != "updater.service" && unit != "neptune.service" && unit != "gryphon.service" && unit != "wyvern.service" {
 				return errors.New("invalid helper restart unit")
 			}
 			found := false
@@ -141,8 +141,8 @@ func Export(password string) (archive []byte, err error) {
 	}()
 	return Seal(entries, password)
 }
-func ownership() error {
-	for _, root := range roots {
+func ownershipForRoots(selected []string) error {
+	for _, root := range selected {
 		if _, err := os.Stat("/" + root); errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -218,6 +218,8 @@ func ownership() error {
 	}
 	return nil
 }
+
+func ownership() error { return ownershipForRoots(roots) }
 func health(unit string) error {
 	socket, host := "/run/neptune/neptuned.sock", "neptune.local"
 	route := "/v1/health"

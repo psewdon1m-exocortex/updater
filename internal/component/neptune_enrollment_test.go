@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestValidateNeptuneEnrollmentProfileRequiresVoltDualPipeline(t *testing.T) {
+func TestValidateNeptuneEnrollmentProfileAcceptsSelectedVoltPipelines(t *testing.T) {
 	valid := saturnEnrollment{
 		NamespaceSlug: "volt", MirrorRoot: "volt", MirrorToken: "mirror-token",
 		MirrorMode: "single-file", MirrorTargetFilename: "personal.volt",
@@ -18,7 +18,7 @@ func TestValidateNeptuneEnrollmentProfileRequiresVoltDualPipeline(t *testing.T) 
 		name       string
 		enrollment saturnEnrollment
 	}{
-		{name: "archive only", enrollment: saturnEnrollment{NamespaceSlug: "volt"}},
+
 		{name: "wrong namespace", enrollment: saturnEnrollment{NamespaceSlug: "chronos", MirrorRoot: "volt", MirrorToken: "mirror-token", MirrorMode: "single-file", MirrorTargetFilename: "personal.volt"}},
 		{name: "wrong root", enrollment: saturnEnrollment{NamespaceSlug: "volt", MirrorRoot: "mastermind", MirrorToken: "mirror-token", MirrorMode: "zip-tree"}},
 		{name: "wrong mode", enrollment: saturnEnrollment{NamespaceSlug: "volt", MirrorRoot: "volt", MirrorToken: "mirror-token", MirrorMode: "zip-tree", MirrorTargetFilename: "personal.volt"}},
@@ -37,6 +37,40 @@ func TestValidateNeptuneEnrollmentProfileRejectsCrossServiceCode(t *testing.T) {
 	err := validateNeptuneEnrollmentProfile("chronos", saturnEnrollment{NamespaceSlug: "kernel"})
 	if err == nil || !strings.Contains(err.Error(), "expected \"chronos\"") {
 		t.Fatalf("unexpected validation result: %v", err)
+	}
+}
+
+func TestSelectedNeptuneCapabilitiesPermitSingleChannels(t *testing.T) {
+	for _, service := range []string{"volt", "mastermind"} {
+		enabled, disabled := true, false
+		archive := saturnEnrollment{NamespaceSlug: service, Token: strings.Repeat("a", 43), ArchivePipeline: &enabled}
+		if err := validateNeptuneEnrollmentProfile(service, archive); err != nil {
+			t.Fatal("archive-only rejected", err)
+		}
+		empty := archive
+		empty.ArchivePipeline = &disabled
+		if err := validateNeptuneEnrollmentProfile(service, empty); err == nil {
+			t.Fatal("no capabilities accepted")
+		}
+		mirror := empty
+		mirror.MirrorRoot = service
+		mirror.MirrorToken = strings.Repeat("b", 43)
+		if service == "volt" {
+			mirror.MirrorMode = "single-file"
+			mirror.MirrorTargetFilename = "personal.volt"
+		} else {
+			mirror.MirrorMode = "zip-tree"
+			mirror.ReaderRoot = "root"
+			mirror.ReaderCapability = "neptune.resource-reader.v1"
+			mirror.ReaderToken = strings.Repeat("c", 43)
+		}
+		if err := validateNeptuneEnrollmentProfile(service, mirror); err != nil {
+			t.Fatal("mirror-only rejected", err)
+		}
+		mirror.ArchivePipeline = &enabled
+		if err := validateNeptuneEnrollmentProfile(service, mirror); err != nil {
+			t.Fatal("combined rejected", err)
+		}
 	}
 }
 

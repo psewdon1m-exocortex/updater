@@ -181,6 +181,13 @@ func (s Server) operatorSnapshot(ctx context.Context) console.Snapshot {
 	result := console.Snapshot{Protocol: console.Protocol, Host: console.Text(host), ObservedAt: time.Now().UTC(), Components: console.LocalComponents(ctx, s.Version), Heads: []console.Head{}, Jobs: []console.Job{}}
 	if hostConfig, err := config.LoadHost(s.Runtime); err == nil {
 		result.KernelURL, result.KernelTokenFile, result.HostID = console.Text(hostConfig.KernelURL), console.Text(hostConfig.KernelTokenFile), console.Text(hostConfig.HostID)
+		result.RecoveryGatewayURL = console.Text(hostConfig.RecoveryGatewayURL)
+		for _, service := range []string{"updater", "neptune", "gryphon", "wyvern"} {
+			if hostConfig.RecoveryTokenFiles[service] != "" && hostConfig.RecoverySlugs[service] != "" {
+				result.RecoveryServices = append(result.RecoveryServices, service)
+			}
+		}
+		result.RecoveryConfigured = hostConfig.RecoveryGatewayURL != "" && len(result.RecoveryServices) > 0
 		if result.HostID == "" {
 			if id, err := config.LocalHostID(); err == nil {
 				result.HostID = id
@@ -259,6 +266,9 @@ func (s Server) operatorSnapshot(ctx context.Context) console.Snapshot {
 }
 
 func jobComponent(service string) string {
+	if strings.HasPrefix(service, "host-recovery") {
+		return "updater"
+	}
 	for _, kind := range []string{"updater", "neptune", "gryphon", "wyvern", "window"} {
 		if service == kind || strings.HasPrefix(service, kind+"-") {
 			return kind
@@ -274,6 +284,9 @@ func operatorJob(job model.Job) console.Job {
 		summary = "Accepted by Updater"
 	case "INSTALLING":
 		summary = "Verifying release and installing"
+		if job.Service == "host-recovery-export" {
+			summary = "Creating and publishing one scoped helper recovery archive"
+		}
 		if job.Service == "gryphon-bot" {
 			summary = "Verifying the Telegram bot and registering its webhook"
 		}
@@ -283,6 +296,12 @@ func operatorJob(job model.Job) console.Job {
 		summary = "Checking the running version"
 	case "COMPLETED":
 		summary = "Operation completed and verified"
+		if job.Service == "host-recovery-export" {
+			summary = "Scoped recovery archive published under its service namespace"
+		}
+		if job.Service == "host-recovery-restore" {
+			summary = "Scoped helper state restored and verified"
+		}
 		if job.Service == "gryphon-bot" {
 			summary = "Bot registered; send the pairing command in Telegram"
 			if job.Message == "Bot already paired with the shared Gryphon gateway" {
@@ -302,7 +321,12 @@ func operatorJob(job model.Job) console.Job {
 	if job.Service == "updater-self-update" || job.Service == "gryphon-update" || job.Service == "wyvern-update" || job.Service == "window-update" {
 		headID = ""
 	}
-	return console.Job{ID: console.Text(job.ID), RequestID: console.Text(job.RequestID), HeadID: console.Text(headID), Component: jobComponent(job.Service), State: console.Text(job.State), Version: console.Text(job.Version), Summary: summary, UpdatedAt: job.UpdatedAt, Finished: job.FinishedAt != nil}
+	componentID := jobComponent(job.Service)
+	if strings.HasPrefix(job.Service, "host-recovery") && (job.HeadID == "updater" || job.HeadID == "neptune" || job.HeadID == "gryphon" || job.HeadID == "wyvern") {
+		componentID = job.HeadID
+		headID = ""
+	}
+	return console.Job{ID: console.Text(job.ID), RequestID: console.Text(job.RequestID), HeadID: console.Text(headID), Component: componentID, State: console.Text(job.State), Version: console.Text(job.Version), Summary: summary, UpdatedAt: job.UpdatedAt, Finished: job.FinishedAt != nil}
 }
 
 func (s Server) operatorAction(w http.ResponseWriter, r *http.Request) {
@@ -312,6 +336,10 @@ func (s Server) operatorAction(w http.ResponseWriter, r *http.Request) {
 	}
 	if action.Component == "window" && (action.Kind == "pair" || action.Kind == "open" || action.Kind == "revoke" || action.Kind == "repair") {
 		s.operatorWindowAction(w, r, action)
+		return
+	}
+	if (action.Component == "updater" || action.Component == "neptune" || action.Component == "gryphon" || action.Component == "wyvern") && strings.HasPrefix(action.Kind, "recovery-") {
+		s.operatorRecoveryAction(w, r, action)
 		return
 	}
 	if action.Component == "gryphon" && action.Kind == "connect-bot" {

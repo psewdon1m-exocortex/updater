@@ -15,6 +15,15 @@ type row struct {
 	raw    bool
 }
 
+func recoveryConfigured(snapshot console.Snapshot, service string) bool {
+	for _, configured := range snapshot.RecoveryServices {
+		if configured == service {
+			return true
+		}
+	}
+	return false
+}
+
 func (m Model) View() string {
 	width := min(m.width, 160)
 	height := min(m.height, 80)
@@ -209,6 +218,13 @@ func (m Model) rows() []row {
 				add("Kernel access: " + m.snapshot.KernelAccess)
 			}
 		}
+		if component.ID != "window" {
+			if recoveryConfigured(m.snapshot, component.ID) {
+				add(title(component.ID) + " recovery storage: " + m.snapshot.RecoveryGatewayURL + " (configured independently)")
+			} else {
+				add(title(component.ID) + " recovery storage: pending")
+			}
+		}
 		add("")
 		if m.notice != "" {
 			add(m.notice)
@@ -226,7 +242,9 @@ func (m Model) rows() []row {
 		}
 	case form:
 		heading(title(component.ID) + " / " + actionLabel(m.pending.Kind))
-		if m.pending.Component == "window" {
+		if m.pending.Recovery != nil {
+			add("Scope: shared host recovery; remote files are isolated under backups/<service>")
+		} else if m.pending.Component == "window" {
 			add("Scope: paired development PC; all Window diagnostic sources")
 		} else if m.pending.Component == "wyvern" || m.pending.Component == "gryphon" && (m.pending.Kind == "update" || m.pending.Kind == "connect-bot") {
 			add("Scope: all clients of the local " + title(m.pending.Component) + " instance")
@@ -244,6 +262,15 @@ func (m Model) rows() []row {
 		}
 		if m.choice == "set-kernel" {
 			add("Enter a protected file path for an already authorized machine credential. The token is never shown or stored in this form.")
+		}
+		if m.choice == "recovery-configure" {
+			add("Create this service's setup code in Saturn Synchronization. Saturn is resolved from Updater's Kernel Register. Its permanent token stays in a separate root-only file.")
+		}
+		if m.choice == "recovery-export" {
+			add("Creates and publishes one independently encrypted service archive through Saturn Gateway. The encryption key is managed automatically. Export the recovery key once and keep it outside this host.")
+		}
+		if m.choice == "recovery-restore" {
+			add("The archive restores one service only. Trusted binaries and its systemd unit must already be installed.")
 		}
 		if m.choice == "adapter-put" {
 			add("A new Adapter needs an API key. Existing clients keep their selected bindings. Declare only capabilities supported by the chosen model.")
@@ -267,6 +294,11 @@ func (m Model) rows() []row {
 		if m.pending.Kind == "image-clean" && m.imagePlan != nil {
 			add(fmt.Sprintf("Scope: %d reviewed Exocortex images; no volumes or other projects", len(m.imagePlan.Candidates)))
 			add("Inventory is checked again under the host operation lock before deletion.")
+		} else if m.pending.Recovery != nil {
+			add("Scope: shared host recovery")
+			if m.pending.Recovery.Service != "" {
+				add("Recovery service: " + m.pending.Recovery.Service)
+			}
 		} else if m.pending.Component == "window" {
 			add("Scope: paired development PC; all Window diagnostic sources")
 		} else if m.pending.Component == "wyvern" {
@@ -292,6 +324,15 @@ func (m Model) rows() []row {
 		}
 		if m.pending.Kind == "update" {
 			add("The shared component may briefly restart. Other local services use this same component.")
+		}
+		if m.pending.Kind == "recovery-configure" {
+			add("This service's one-time code is exchanged with Saturn; its permanent producer token is written to a private root-owned file and never displayed.")
+		}
+		if m.pending.Kind == "recovery-export" {
+			add(title(m.pending.Recovery.Service) + " is briefly quiesced. Its scoped archive is validated before upload through Gateway.")
+		}
+		if m.pending.Kind == "recovery-restore" {
+			add("Current state is transactionally replaced only for the selected service and rolled back if verification fails.")
 		}
 		if m.pending.Component == "wyvern" {
 			if m.pending.Wyvern != nil {
@@ -444,6 +485,7 @@ func (m Model) rows() []row {
 			"Gryphon: register a bot here, send its /link code once in Telegram, then select the paired bot in each service's Settings.",
 			"Wyvern: install a missing gateway, connect it using the host machine credential, manage Adapters and client grants, then select an allowed Adapter in each service's Settings.",
 			"Operation IDs survive console/SSH loss. Reopen operation history after reconnecting. Never assume a lost response means no operation started.",
+			"Recovery: configure only installed services with their individual Saturn setup codes. Each component creates and restores its own archive under backups/<service>; no operation requires or reads neighboring pipelines.",
 			"After Updater self-update, the console reconnects. Relaunch updater tui to use the new UI version. Host/daemon interruption follows existing recovery rules.",
 			"Termius: use an ordinary SSH terminal with a PTY. Resize or rotate the screen freely. Special fonts and mouse support are unnecessary.",
 			"Use updater tui --no-color for monochrome. Use updater tui --demo to explore synthetic data without privileges or service access.",
@@ -465,6 +507,12 @@ func actionLabel(kind string) string {
 		return "Set fallback source"
 	case "set-kernel":
 		return "Set host Kernel connection"
+	case "recovery-configure":
+		return "Configure recovery storage"
+	case "recovery-export":
+		return "Create recovery archive"
+	case "recovery-restore":
+		return "Restore scoped recovery"
 	case "image-clean":
 		return "Clean reviewed Docker images"
 	case "install":

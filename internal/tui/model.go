@@ -140,7 +140,16 @@ func (m Model) menu() []menuItem {
 		return items
 	}
 	if m.selected == 0 {
-		items = append(items, menuItem{"Set host Kernel machine connection", "set-kernel"}, menuItem{"Review Docker image storage", "images"})
+		items = append(items,
+			menuItem{"Set host Kernel machine connection", "set-kernel"},
+			menuItem{"Review Docker image storage", "images"},
+		)
+	}
+	if m.selected < 4 {
+		items = append(items, menuItem{"Configure " + title(m.component().ID) + " recovery storage", "recovery-configure"}, menuItem{"Advanced: recovery Saturn origin override", "recovery-configure-override"})
+		if m.component().Installed {
+			items = append(items, menuItem{"Create " + title(m.component().ID) + " recovery archive", "recovery-export"}, menuItem{"Restore " + title(m.component().ID) + " recovery archive", "recovery-restore"}, menuItem{"Export recovery key to private file", "recovery-key-export"}, menuItem{"Restore legacy archive with passphrase", "recovery-restore-legacy"})
+		}
 	}
 	if m.selected < 3 {
 		if m.component().Installed {
@@ -544,6 +553,45 @@ func (m Model) choose(action string) (tea.Model, tea.Cmd) {
 		m.screen, m.cursor = form, 0
 		return m, textinput.Blink
 	}
+	if m.selected < 4 && strings.HasPrefix(action, "recovery-") {
+		m.choice = action
+		service := m.component().ID
+		m.pending = console.Action{Component: service, Kind: action, Recovery: &console.RecoveryInput{Service: service}}
+		if action == "recovery-configure-override" {
+			m.pending.Kind = "recovery-configure"
+		}
+		if action == "recovery-restore-legacy" {
+			m.pending.Kind = "recovery-restore"
+		}
+		m.clearFields()
+		switch action {
+		case "recovery-configure":
+			m.fields = []field{newField(title(service)+" setup code", "", true, 32)}
+		case "recovery-configure-override":
+			m.fields = []field{
+				newField("Saturn HTTPS origin", m.snapshot.RecoveryGatewayURL, false, 512),
+				newField(title(service)+" setup code", "", true, 32),
+			}
+		case "recovery-export":
+			m.fields = []field{
+				newField("Type CREATE "+strings.ToUpper(service)+" RECOVERY", "", false, 40),
+			}
+		case "recovery-key-export":
+			m.fields = []field{newField("Absolute path for new recovery key file", "", false, 1024)}
+		case "recovery-restore", "recovery-restore-legacy":
+			m.fields = []field{
+				newField("Absolute .exorecovery file path", "", false, 1024),
+				newField("Recovery key file (empty: use this host key)", "", false, 1024),
+				newField("Type RESTORE "+strings.ToUpper(service), "", false, 32),
+			}
+		}
+		if action == "recovery-restore-legacy" {
+			m.fields[1] = newField("Legacy archive passphrase", "", true, 1024)
+		}
+		m.fields[0].input.Focus()
+		m.screen, m.cursor = form, 0
+		return m, textinput.Blink
+	}
 	if m.component().ID == "wyvern" {
 		if wyvernManagementAction(action) {
 			return m.chooseWyvernManagement(action)
@@ -743,7 +791,7 @@ func (m Model) updateForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		for _, field := range m.fields {
-			if field.input.Value() == "" && !(m.choice == "adapter-put" && field.label == "API key (empty keeps existing key)") && !(m.choice == "client-grant" && field.label == "Allowed Adapter IDs (comma separated; empty revokes all)") && !(m.choice == "connect-kernel" && field.label == "Host instance ID (empty: derived from machine-id)") {
+			if field.input.Value() == "" && !(m.choice == "recovery-restore" && field.label == "Recovery key file (empty: use this host key)") && !(m.choice == "adapter-put" && field.label == "API key (empty keeps existing key)") && !(m.choice == "client-grant" && field.label == "Allowed Adapter IDs (comma separated; empty revokes all)") && !(m.choice == "connect-kernel" && field.label == "Host instance ID (empty: derived from machine-id)") {
 				m.notice = "Complete the required fields before continuing."
 				return m, nil
 			}
@@ -765,6 +813,28 @@ func (m Model) updateForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.choice == "set-kernel" {
 			m.pending.KernelURL, m.pending.KernelTokenFile, m.pending.HostID = m.fields[0].input.Value(), m.fields[1].input.Value(), m.fields[2].input.Value()
+		}
+		if m.choice == "recovery-configure" {
+			m.pending.Recovery.EnrollmentCodes = map[string]string{m.pending.Recovery.Service: m.fields[0].input.Value()}
+		}
+		if m.choice == "recovery-configure-override" {
+			m.pending.Recovery.GatewayURL = m.fields[0].input.Value()
+			m.pending.Recovery.EnrollmentCodes = map[string]string{m.pending.Recovery.Service: m.fields[1].input.Value()}
+		}
+		if m.choice == "recovery-key-export" {
+			m.pending.Recovery.KeyPath = m.fields[0].input.Value()
+		}
+		if m.choice == "recovery-export" {
+			m.pending.Recovery.Confirmation = m.fields[0].input.Value()
+		}
+		if m.choice == "recovery-restore" || m.choice == "recovery-restore-legacy" {
+			m.pending.Recovery.ArchivePath = m.fields[0].input.Value()
+			if m.choice == "recovery-restore-legacy" {
+				m.pending.Recovery.Passphrase = m.fields[1].input.Value()
+			} else {
+				m.pending.Recovery.KeyPath = m.fields[1].input.Value()
+			}
+			m.pending.Recovery.Confirmation = m.fields[2].input.Value()
 		}
 		if m.choice == "pair" {
 			m.pending.PublicKey = m.fields[0].input.Value()
@@ -860,6 +930,12 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		defer cancel()
 		job, err := m.backend.Act(ctx, action)
 		action.BotToken, action.SetupCode = "", ""
+		if action.Recovery != nil {
+			action.Recovery.Passphrase = ""
+			for service := range action.Recovery.EnrollmentCodes {
+				action.Recovery.EnrollmentCodes[service] = ""
+			}
+		}
 		return replyMsg{generation: generation, kind: "action", job: &job, err: err}
 	}
 }

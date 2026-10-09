@@ -194,7 +194,11 @@ func validateData(entry Entry) error {
 			ID         string `json:"id"`
 			Service    string `json:"service"`
 		}
-		if json.Unmarshal(entry.Data, &job) != nil || (!regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`).MatchString(job.HeadID) && !(job.HeadID == "" && strings.HasPrefix(job.Service, "wyvern-"))) || path.Base(entry.Name) != job.ID+".json" {
+		if json.Unmarshal(entry.Data, &job) != nil {
+			return errors.New("invalid restored Updater job")
+		}
+		hostOwned := job.HeadID == "" && regexp.MustCompile(`^(?:host-recovery(?:-[a-z]+)?|(?:updater|neptune|gryphon|wyvern|window)(?:-[a-z]+)?)$`).MatchString(job.Service)
+		if (!regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`).MatchString(job.HeadID) && !hostOwned) || path.Base(entry.Name) != job.ID+".json" {
 			return errors.New("invalid restored Updater job")
 		}
 		if job.BackupPath != "" && (!strings.HasPrefix(job.BackupPath, "/var/lib/updater/backups/") || path.Clean(job.BackupPath) != job.BackupPath) {
@@ -205,10 +209,10 @@ func validateData(entry Entry) error {
 }
 
 // Collect is called only while the helper daemons are stopped and Updater is idle.
-func Collect(root string) ([]Entry, error) {
+func collectRoots(root string, selected []string) ([]Entry, error) {
 	entries := []Entry{}
 	total := int64(0)
-	for _, base := range roots {
+	for _, base := range selected {
 		start := filepath.Join(root, filepath.FromSlash(base))
 		if _, err := os.Stat(start); errors.Is(err, fs.ErrNotExist) {
 			continue
@@ -251,3 +255,5 @@ func Collect(root string) ([]Entry, error) {
 	}
 	return entries, nil
 }
+
+func Collect(root string) ([]Entry, error) { return collectRoots(root, roots) }

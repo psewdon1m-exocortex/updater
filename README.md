@@ -196,6 +196,32 @@ updater tui --demo
 updater tui --no-color --demo
 ```
 
+Each Updater, Neptune, Gryphon and Wyvern screen owns its independent host
+recovery pipeline. Create only the identities for services installed on that
+host, then enter that service's one-time setup code in its **Configure … recovery storage** action. Saturn's HTTPS origin comes from Updater's own Kernel Register. A saved origin supports outages; an explicit advanced origin override supports recovery. Updater exchanges each code
+independently and keeps the resulting producer token in a separate root-owned
+file. **Create … recovery archive** quiesces only the selected service, creates
+one authenticated encrypted `.exorecovery` file and uploads it through Saturn
+Gateway:
+
+```text
+backups/updater/<server-id>/<year>/<month>/<day>/...
+backups/neptune/<server-id>/<year>/<month>/<day>/...
+backups/gryphon/<server-id>/<year>/<month>/<day>/...
+backups/wyvern/<server-id>/<year>/<month>/<day>/...
+```
+
+When configured, `updater`, `neptune`, `gryphon` and `wyvern` use distinct
+folders directly under `backups`; a missing service needs no empty identity or
+folder. The stable server ID partitions hosts inside each matching folder.
+
+New archives use an independent generated recovery key for each service, stored under `<StateDir>/recovery-keys/<service>.json` with mode 0600. Use **Export recovery key to private file** once and keep that file outside the host; producer-token rotation does not change the key. The operator API never returns the key. To restore, download one archive through the owner file manager, install the matching trusted binary/unit, and choose **Restore … recovery archive** with an exported key file, or leave the key path empty to use this host’s key. **Restore legacy archive with passphrase** reads existing password-encrypted scoped archives. The archive header is cryptographically bound to its
+service; restoring one service transactionally replaces only that service's
+roots and cannot erase neighboring helper state. The former Saturn browser
+form and service-facing Updater host-recovery route are intentionally absent.
+Legacy combined v1 archives remain accepted by the root CLI for migration;
+new exports always use the selected service's scoped format.
+
 Use arrows, Enter and Esc; Tab moves between form fields. The demo uses
 synthetic data and needs neither root nor installed services. In normal mode,
 the console connects to the separate root-only operator socket. Install the

@@ -179,9 +179,6 @@ restart_required=false
 # host permissions and the unit without replacing/restarting the running daemon.
 if [ "${UPDATER_PREPARE_ONLY:-false}" = true ]; then
   install -m 0644 "$script_dir/systemd/updater.service" /etc/systemd/system/updater.service
-  if [ -n "$head_env" ] && grep -q '^UPDATER_SERVICE_ID=saturn$' "$head_env" && ! grep -q '^UPDATER_HOST_RECOVERY_ALLOWED=' "$head_env"; then
-    printf '\nUPDATER_HOST_RECOVERY_ALLOWED=true\n' >> "$head_env"
-  fi
   systemctl daemon-reload
   exit 0
 fi
@@ -206,9 +203,6 @@ socket_gid="$(getent group updater | cut -d: -f3)"
 
 if [ "$standalone" != true ]; then
   /usr/bin/updater register-head "$head_id" "$head_env"
-  if grep -q '^UPDATER_SERVICE_ID=saturn$' "$head_env" && ! grep -q '^UPDATER_HOST_RECOVERY_ALLOWED=' "$head_env"; then
-    printf '\nUPDATER_HOST_RECOVERY_ALLOWED=true\n' >> "$head_env"
-  fi
   if grep -q '^UPDATER_SOCKET_GID=' "$head_env"; then
     sed -i "s/^UPDATER_SOCKET_GID=.*/UPDATER_SOCKET_GID=$socket_gid/" "$head_env"
   else

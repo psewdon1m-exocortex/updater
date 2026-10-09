@@ -16,14 +16,16 @@ import (
 )
 
 type saturnRunner struct {
-	mu    sync.Mutex
-	calls []string
+	mu           sync.Mutex
+	calls        []string
+	environments [][]string
 }
 
-func (r *saturnRunner) Run(_ context.Context, name string, args, _ []string, _ string) ([]byte, error) {
+func (r *saturnRunner) Run(_ context.Context, name string, args, environment []string, _ string) ([]byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, name+" "+strings.Join(args, " "))
+	r.environments = append(r.environments, append([]string(nil), environment...))
 	if len(args) > 1 && args[0] == "image" && args[1] == "inspect" {
 		return []byte("sha256:" + strings.Repeat("a", 64)), nil
 	}
@@ -33,6 +35,11 @@ func (r *saturnRunner) Run(_ context.Context, name string, args, _ []string, _ s
 	return []byte("ok"), nil
 }
 func TestSaturnRollsBackBothImagesAndDatabaseBeforeReadiness(t *testing.T) {
+	t.Run("legacy", func(t *testing.T) { testSaturnRollback(t, false) })
+	t.Run("candidate-recovery-image", func(t *testing.T) { testSaturnRollback(t, true) })
+}
+
+func testSaturnRollback(t *testing.T, offline bool) {
 	instance, runtime, store := testEngine(t, false)
 	head, err := config.LoadHead(runtime, "kernel")
 	if err != nil {
@@ -57,6 +64,9 @@ func TestSaturnRollsBackBothImagesAndDatabaseBeforeReadiness(t *testing.T) {
 		result.Manifest.Image.Reference = "ghcr.io/example/app"
 		result.Manifest.Image.Digest = "sha256:new"
 		result.Manifest.WebImage = "ghcr.io/example/web@sha256:new"
+		if offline {
+			result.Manifest.RollbackRestore = "saturn-offline-v1"
+		}
 		return result, nil
 	})
 	var healthCalls atomic.Int32
@@ -83,8 +93,21 @@ func TestSaturnRollsBackBothImagesAndDatabaseBeforeReadiness(t *testing.T) {
 			}
 			runner.mu.Lock()
 			calls := strings.Join(runner.calls, "\n")
+			var recoveryEnvironment []string
+			for index, call := range runner.calls {
+				if strings.Contains(call, "recovery-cli.mjs restore-rollback") {
+					recoveryEnvironment = runner.environments[index]
+				}
+			}
 			runner.mu.Unlock()
-			restore := strings.Index(calls, "recovery-cli.mjs restore-replace")
+			restoreCommand := "restore-replace"
+			if offline {
+				restoreCommand = "restore-rollback"
+				if current.RecoveryImage != "ghcr.io/example/app@sha256:new" || !strings.Contains(strings.Join(recoveryEnvironment, "\n"), head.ImageVariable+"="+current.RecoveryImage) {
+					t.Fatal("rollback must use the candidate recovery image to restore the exact previous schema")
+				}
+			}
+			restore := strings.Index(calls, "recovery-cli.mjs "+restoreCommand)
 			if !strings.Contains(calls, "--user 1000:1000") || !strings.Contains(calls, "api node /app/scripts/recovery-cli.mjs") {
 				t.Fatal("recovery requires the application uid, secrets and storage runtime volume")
 			}

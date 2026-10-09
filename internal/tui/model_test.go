@@ -110,6 +110,72 @@ func TestCredentialFormPasteResizeAndCancel(t *testing.T) {
 	}
 }
 
+func TestRecoveryConfigurationIsIndependentAndMaskedForEveryHostService(t *testing.T) {
+	for selected, service := range []string{"updater", "neptune", "gryphon", "wyvern"} {
+		m := loaded()
+		m.selected = selected
+		found := map[string]bool{}
+		for _, item := range m.menu() {
+			if strings.HasPrefix(item.action, "recovery-") {
+				found[item.action] = true
+			}
+		}
+		if !found["recovery-configure"] {
+			t.Fatal(service, "menu is missing recovery-configure")
+		}
+		if m.component().Installed && (!found["recovery-export"] || !found["recovery-restore"]) {
+			t.Fatal(service, "installed service is missing export or restore")
+		}
+		if !m.component().Installed && (found["recovery-export"] || found["recovery-restore"]) {
+			t.Fatal(service, "absent service exposes export or restore")
+		}
+		next, _ := m.choose("recovery-configure")
+		m = next.(Model)
+		if m.screen != form || len(m.fields) != 1 || m.pending.Component != service || m.pending.Recovery.Service != service {
+			t.Fatal(service, "recovery configuration form is not independently scoped")
+		}
+		code := strings.Repeat(service[:1], 32)
+		m.fields[0].input.SetValue(code)
+		if strings.Contains(m.View(), code) {
+			t.Fatal("setup code is visible in the terminal", service)
+		}
+		m = key(m, tea.KeyEsc)
+		if len(m.fields) != 0 || m.pending.Recovery != nil {
+			t.Fatal("cancel retained recovery enrollment code", service)
+		}
+	}
+}
+
+func TestRecoveryFormsUseAutomaticKeysAndKeepLegacyRestoreSeparate(t *testing.T) {
+	m := loaded()
+	m.selected = 0
+	next, _ := m.choose("recovery-export")
+	formModel := next.(Model)
+	if len(formModel.fields) != 1 || strings.Contains(strings.ToLower(formModel.fields[0].label), "passphrase") {
+		t.Fatal("new archive requires a password")
+	}
+	next, _ = m.choose("recovery-restore")
+	formModel = next.(Model)
+	if len(formModel.fields) != 3 || formModel.fields[1].label != "Recovery key file (empty: use this host key)" {
+		t.Fatal("normal restore does not use a key file")
+	}
+	next, _ = m.choose("recovery-restore-legacy")
+	formModel = next.(Model)
+	if formModel.pending.Kind != "recovery-restore" || formModel.fields[1].label != "Legacy archive passphrase" {
+		t.Fatal("legacy restore is unavailable")
+	}
+	next, _ = m.choose("recovery-configure-override")
+	formModel = next.(Model)
+	if formModel.pending.Kind != "recovery-configure" || len(formModel.fields) != 2 {
+		t.Fatal("advanced origin override unavailable")
+	}
+	next, _ = m.choose("recovery-key-export")
+	formModel = next.(Model)
+	if len(formModel.fields) != 1 || strings.Contains(formModel.View(), "secret recovery key") {
+		t.Fatal("key export is not a private-file operation")
+	}
+}
+
 func TestGryphonCheckDoesNotChooseService(t *testing.T) {
 	m := loaded()
 	m.selected = 2

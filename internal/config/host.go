@@ -28,10 +28,13 @@ var hostIdentifier = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 // HostConfig is owned by the host, never by a registered application head.
 // The Kernel machine token is kept in a separate root-owned file.
 type HostConfig struct {
-	KernelURL       string            `json:"kernel_url,omitempty"`
-	KernelTokenFile string            `json:"kernel_token_file,omitempty"`
-	HostID          string            `json:"host_id,omitempty"`
-	ReleaseSources  map[string]string `json:"release_sources,omitempty"`
+	KernelURL          string            `json:"kernel_url,omitempty"`
+	KernelTokenFile    string            `json:"kernel_token_file,omitempty"`
+	HostID             string            `json:"host_id,omitempty"`
+	ReleaseSources     map[string]string `json:"release_sources,omitempty"`
+	RecoveryGatewayURL string            `json:"recovery_gateway_url,omitempty"`
+	RecoveryTokenFiles map[string]string `json:"recovery_token_files,omitempty"`
+	RecoverySlugs      map[string]string `json:"recovery_slugs,omitempty"`
 }
 
 func HostConfigFile(runtime Runtime) string {
@@ -55,6 +58,25 @@ func validateHost(cfg HostConfig) error {
 	}
 	if cfg.KernelTokenFile != "" && !filepath.IsAbs(cfg.KernelTokenFile) {
 		return errors.New("Kernel token file must have an absolute path")
+	}
+	if cfg.RecoveryGatewayURL != "" && !validHTTPS(cfg.RecoveryGatewayURL) {
+		return errors.New("recovery Gateway URL must be HTTPS without userinfo, query or fragment")
+	}
+	for service, tokenFile := range cfg.RecoveryTokenFiles {
+		if service != "updater" && service != "neptune" && service != "gryphon" && service != "wyvern" {
+			return fmt.Errorf("unknown recovery service %q", service)
+		}
+		if !filepath.IsAbs(tokenFile) {
+			return fmt.Errorf("recovery token file for %s must be absolute", service)
+		}
+	}
+	for service, slug := range cfg.RecoverySlugs {
+		if service != "updater" && service != "neptune" && service != "gryphon" && service != "wyvern" {
+			return fmt.Errorf("unknown recovery service %q", service)
+		}
+		if !hostIdentifier.MatchString(slug) {
+			return fmt.Errorf("recovery producer slug for %s is invalid", service)
+		}
 	}
 	for component, raw := range cfg.ReleaseSources {
 		if component != "updater" && component != "neptune" && component != "gryphon" && component != "wyvern" && component != "window" {
@@ -81,6 +103,12 @@ func LoadHost(runtime Runtime) (HostConfig, error) {
 	}
 	if cfg.ReleaseSources == nil {
 		cfg.ReleaseSources = map[string]string{}
+	}
+	if cfg.RecoveryTokenFiles == nil {
+		cfg.RecoveryTokenFiles = map[string]string{}
+	}
+	if cfg.RecoverySlugs == nil {
+		cfg.RecoverySlugs = map[string]string{}
 	}
 	return cfg, validateHost(cfg)
 }
