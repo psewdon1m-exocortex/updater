@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -56,7 +57,7 @@ func CollectScope(root, scope string) ([]Entry, error) {
 				RecoveryPending bool       `json:"recovery_pending"`
 			}
 			if json.Unmarshal(entry.Data, &job) != nil {
-				return nil, errors.New("invalid Updater job in recovery source")
+				return nil, fmt.Errorf("invalid Updater job %q in recovery source", entry.Name)
 			}
 			if job.FinishedAt == nil || job.RecoveryPending {
 				clear(entry.Data)

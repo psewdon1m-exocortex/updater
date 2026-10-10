@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -25,6 +26,23 @@ const MaxBytes = 128 * 1024 * 1024
 const magic = "EXOCORTEX-HELPER-RECOVERY-1\n"
 
 var roots = []string{"etc/neptune", "etc/gryphon", "var/lib/neptune", "var/lib/gryphon", "var/lib/updater/jobs", "var/lib/updater/backups", "etc/wyvern/identity", "etc/exocortex/wyvern", "var/lib/wyvern"}
+
+var recoveryJobHead = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
+var legacyHostJobService = regexp.MustCompile(`^(?:host-recovery(?:-[a-z]+)?|(?:updater|neptune|gryphon|wyvern|window)(?:-[a-z]+)?)$`)
+
+func hostOwnedJobService(service string) bool {
+	// Host operations have no application head. Keep the legacy single-suffix
+	// forms and explicitly accept the multi-suffix kinds emitted by the TUI.
+	switch service {
+	case "updater-kernel-connection", "updater-self-update", "host-recovery-key-export",
+		"wyvern-connect-kernel", "wyvern-adapter-put", "wyvern-profile-put",
+		"wyvern-adapter-disable", "wyvern-adapter-enable", "wyvern-adapter-delete",
+		"wyvern-client-grant", "wyvern-client-revoke":
+		return true
+	default:
+		return legacyHostJobService.MatchString(service)
+	}
+}
 
 type Entry struct {
 	Name string
@@ -195,14 +213,17 @@ func validateData(entry Entry) error {
 			Service    string `json:"service"`
 		}
 		if json.Unmarshal(entry.Data, &job) != nil {
-			return errors.New("invalid restored Updater job")
+			return fmt.Errorf("invalid restored Updater job %q: invalid JSON", entry.Name)
 		}
-		hostOwned := job.HeadID == "" && regexp.MustCompile(`^(?:host-recovery(?:-[a-z]+)?|(?:updater|neptune|gryphon|wyvern|window)(?:-[a-z]+)?)$`).MatchString(job.Service)
-		if (!regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`).MatchString(job.HeadID) && !hostOwned) || path.Base(entry.Name) != job.ID+".json" {
-			return errors.New("invalid restored Updater job")
+		hostOwned := job.HeadID == "" && hostOwnedJobService(job.Service)
+		if !recoveryJobHead.MatchString(job.HeadID) && !hostOwned {
+			return fmt.Errorf("invalid restored Updater job %q: invalid head or host operation", entry.Name)
+		}
+		if path.Base(entry.Name) != job.ID+".json" {
+			return fmt.Errorf("invalid restored Updater job %q: filename does not match job ID", entry.Name)
 		}
 		if job.BackupPath != "" && (!strings.HasPrefix(job.BackupPath, "/var/lib/updater/backups/") || path.Clean(job.BackupPath) != job.BackupPath) {
-			return errors.New("invalid restored backup path")
+			return fmt.Errorf("invalid restored backup path in Updater job %q", entry.Name)
 		}
 	}
 	return nil

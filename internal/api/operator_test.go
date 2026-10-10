@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"updater/internal/config"
+	"updater/internal/console"
 	"updater/internal/engine"
 	"updater/internal/model"
 	"updater/internal/state"
@@ -176,22 +177,35 @@ func TestRecoveryStorageConfigurationExistsOnlyOnRootOperatorAPI(t *testing.T) {
 		}
 		return identities, nil
 	}
-	bodies := []string{
-		`{"component":"updater","kind":"recovery-configure","request_id":"tui-recovery-updater-123456","recovery":{"gateway_url":"https://saturn.example","service":"updater","enrollment_codes":{"updater":"uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"}}}`,
-		`{"component":"neptune","kind":"recovery-configure","request_id":"tui-recovery-neptune-123456","recovery":{"gateway_url":"https://saturn.example","service":"neptune","enrollment_codes":{"neptune":"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"}}}`,
+	services := []string{"updater", "neptune", "gryphon", "wyvern"}
+	var bodies []string
+	for _, service := range services {
+		body, err := json.Marshal(console.Action{
+			Component: service, Kind: "recovery-configure", RequestID: "tui-recovery-" + service + "-123456",
+			Recovery: &console.RecoveryInput{GatewayURL: "https://saturn.example", Service: service, EnrollmentCodes: map[string]string{service: strings.Repeat(service[:1], 32)}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bodies = append(bodies, string(body))
 	}
 	for _, body := range bodies {
 		response := httptest.NewRecorder()
 		s.operatorHandler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "http://updater.local/v1/actions", strings.NewReader(body)))
-		if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "uuuuuu") || strings.Contains(response.Body.String(), "nnnnnn") {
+		if response.Code != http.StatusOK {
 			t.Fatalf("root recovery configuration failed or disclosed a token: %d %s", response.Code, response.Body.String())
+		}
+		for _, service := range services {
+			if strings.Contains(response.Body.String(), strings.Repeat(service[:1], 6)) {
+				t.Fatal("root recovery configuration disclosed a token", service)
+			}
 		}
 	}
 	snapshot := s.operatorSnapshot(context.Background())
-	if !snapshot.RecoveryConfigured || snapshot.RecoveryGatewayURL != "https://saturn.example" || len(snapshot.RecoveryServices) != 2 {
+	if !snapshot.RecoveryConfigured || snapshot.RecoveryGatewayURL != "https://saturn.example" || len(snapshot.RecoveryServices) != len(services) {
 		t.Fatalf("recovery configuration is not observable without secrets: %+v", snapshot)
 	}
-	for _, service := range []string{"updater", "neptune"} {
+	for _, service := range services {
 		info, err := os.Stat(filepath.Join(filepath.Dir(config.HostConfigFile(s.Runtime)), "recovery-tokens", service+".token"))
 		if err != nil || info.Mode().Perm() != 0o600 {
 			t.Fatalf("private %s token file is missing: %v", service, err)
@@ -207,22 +221,29 @@ func TestRecoveryStorageConfigurationExistsOnlyOnRootOperatorAPI(t *testing.T) {
 }
 
 func TestRecoveryKeyExportNeverReturnsTheKeyAndIsPrivateToRoot(t *testing.T) {
+	for _, service := range []string{"updater", "neptune", "gryphon", "wyvern"} {
+		t.Run(service, func(t *testing.T) { testRecoveryKeyExport(t, service) })
+	}
+}
+
+func testRecoveryKeyExport(t *testing.T, service string) {
+	t.Helper()
 	s := operatorFixture(t)
-	destination := filepath.Join(t.TempDir(), "offline-updater-key.json")
-	body, _ := json.Marshal(map[string]any{"component": "updater", "kind": "recovery-key-export", "request_id": "tui-key-export-123456", "recovery": map[string]string{"service": "updater", "key_path": destination}})
+	destination := filepath.Join(t.TempDir(), "offline-"+service+"-key.json")
+	body, _ := json.Marshal(map[string]any{"component": service, "kind": "recovery-key-export", "request_id": "tui-key-export-123456", "recovery": map[string]string{"service": service, "key_path": destination}})
 	response := httptest.NewRecorder()
 	s.operatorHandler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "http://updater.local/v1/actions", strings.NewReader(string(body))))
 	if response.Code != http.StatusOK {
 		t.Fatal(response.Code, response.Body.String())
 	}
-	key, err := config.ManagedRecoveryKey(s.Runtime, "updater", false)
+	key, err := config.ManagedRecoveryKey(s.Runtime, service, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(response.Body.String(), key) {
 		t.Fatal("API disclosed the recovery key")
 	}
-	exported, err := config.ReadRecoveryKey(destination, "updater")
+	exported, err := config.ReadRecoveryKey(destination, service)
 	if err != nil || exported != key {
 		t.Fatal("private export does not contain the service key", err)
 	}

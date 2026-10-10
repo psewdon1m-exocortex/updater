@@ -1,5 +1,19 @@
 # updater deployment and recovery contract
 
+## 0.6.14 host operation recovery and Window diagnostics
+
+Updater 0.6.14 preserves completed and failed host-owned operation history in
+both scoped and legacy recovery archives. Restore accepts only the explicit
+Updater, Neptune, Gryphon and Wyvern operation-service catalog, validates job
+filenames and keeps damaged-job errors free of stored job contents. Recovery
+coverage verifies resumed uploads, remote receipt identity, independent
+per-service keys, service isolation and rollback after failed health checks.
+
+The installed `windowops` account may also invoke grant-gated, read-only
+`window diagnose` commands through its narrow sudo policy. The restricted TUI
+documents the same boundary; it does not grant mutation or unrestricted Window
+access.
+
 ## 0.6.13 scoped host recovery
 
 Updater 0.6.13 adds service-isolated remote recovery archives for Updater,

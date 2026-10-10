@@ -465,6 +465,7 @@ func (m Model) rows() []row {
 				"Codex opens a separate SSH connection as window@host using the paired key and the forced MCP command. It never runs on this host.",
 				"Revoke access now closes the grant immediately. Start observed operator shell to share echoed commands and output; Codex cannot enter input.",
 				"In the observed shell: sudo window capture-test smoke -- COMMAND [ARG...] saves a bounded test result for the agent.",
+				"Observed shell: sudo window diagnose jobs|containers|logs|inspect|migrations. See Window README for arguments.",
 				"Use the development PC's own SSH host-key verification. Never disable StrictHostKeyChecking.",
 			} {
 				add(line)

@@ -138,7 +138,25 @@ func TestApplyScopedReplacesOnlySelectedService(t *testing.T) {
 
 func TestGatewayPublisherCreatesOneNamespacePerService(t *testing.T) {
 	tokens := map[string]string{}
+	payloads := map[string][]byte{}
 	archives := map[string][]byte{}
+	receiptFault := map[string]string{}
+	root := t.TempDir()
+	fixture := hostRecoveryFixture("snapshot")
+	writeHostRecoveryFixture(t, root, fixture)
+	for _, scope := range RecoveryScopes {
+		tokens[scope] = strings.Repeat(scope[:1], 43)
+		entries, err := CollectScope(root, scope)
+		if err != nil {
+			t.Fatal(scope, err)
+		}
+		payloads[scope], err = SealScope(entries, "synthetic recovery passphrase "+scope, scope)
+		if err != nil {
+			t.Fatal(scope, err)
+		}
+		// Each service resumes an already accepted prefix of its real archive.
+		archives[scope] = bytes.Clone(payloads[scope][:37])
+	}
 	var lock sync.Mutex
 	server := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		lock.Lock()
@@ -158,6 +176,17 @@ func TestGatewayPublisherCreatesOneNamespacePerService(t *testing.T) {
 			return
 		}
 		if request.Method == http.MethodPost && len(parts) == 5 && parts[4] == "runs" {
+			var input struct {
+				ExpectedSize int    `json:"expectedSize"`
+				SHA256       string `json:"sha256"`
+				BackupType   string `json:"backupType"`
+				Encrypted    bool   `json:"encrypted"`
+			}
+			digest := sha256.Sum256(payloads[scope])
+			if json.NewDecoder(request.Body).Decode(&input) != nil || input.ExpectedSize != len(payloads[scope]) || input.SHA256 != hex.EncodeToString(digest[:]) || input.BackupType != "helper_recovery" || !input.Encrypted {
+				http.Error(response, "invalid archive metadata", http.StatusBadRequest)
+				return
+			}
 			_ = json.NewEncoder(response).Encode(map[string]any{"id": scope + "-run"})
 			return
 		}
@@ -172,33 +201,81 @@ func TestGatewayPublisherCreatesOneNamespacePerService(t *testing.T) {
 		}
 		if request.Method == http.MethodPatch && parts[6] == "upload" {
 			body, _ := io.ReadAll(request.Body)
+			if request.Header.Get("Upload-Offset") != fmt.Sprint(len(archives[scope])) || len(body) > 37 {
+				http.Error(response, "incorrect resumed offset or chunk size", http.StatusConflict)
+				return
+			}
 			archives[scope] = append(archives[scope], body...)
 			response.WriteHeader(http.StatusNoContent)
 			return
 		}
 		if request.Method == http.MethodPost && parts[6] == "complete" {
+			if !bytes.Equal(archives[scope], payloads[scope]) {
+				http.Error(response, "stored archive differs from the source", http.StatusConflict)
+				return
+			}
 			digest := sha256.Sum256(archives[scope])
+			checksum, size := hex.EncodeToString(digest[:]), len(archives[scope])
+			logicalPath := "/backups/" + scope + "/2026/10/02/fixture.exorecovery"
+			switch receiptFault[scope] {
+			case "checksum":
+				checksum = strings.Repeat("0", 64)
+			case "size":
+				size++
+			case "namespace":
+				logicalPath = "/backups/other/fixture.exorecovery"
+			}
 			_ = json.NewEncoder(response).Encode(map[string]any{"id": scope + "-run", "receipt": map[string]any{
-				"logicalPath": "/backups/" + scope + "/2026/10/02/fixture.exorecovery", "sha256": hex.EncodeToString(digest[:]), "sizeBytes": len(archives[scope]),
+				"logicalPath": logicalPath, "sha256": checksum, "sizeBytes": size,
 			}})
 			return
 		}
 		http.NotFound(response, request)
 	}))
 	defer server.Close()
-	publisher := &gatewayPublisher{base: server.URL, client: server.Client(), chunk: 5}
+	publisher := &gatewayPublisher{base: server.URL, client: server.Client(), chunk: 37}
 	for _, scope := range RecoveryScopes {
-		tokens[scope] = strings.Repeat(scope[:1], 43)
-		payload := []byte("encrypted-" + scope + "-archive")
-		if scope == "updater" {
-			archives[scope] = bytes.Clone(payload[:5])
-		}
+		payload := payloads[scope]
 		published, err := publisher.publish(t.Context(), ScopedArchive{Scope: scope, Bytes: payload}, scope, tokens[scope], "component-0123456789abcdef", "0.6.12", time.Date(2026, 10, 2, 20, 30, 0, 0, time.UTC))
 		if err != nil {
 			t.Fatal(scope, err)
 		}
-		if published.LogicalPath != "/backups/"+scope+"/2026/10/02/fixture.exorecovery" || !bytes.Equal(archives[scope], payload) {
+		lock.Lock()
+		received := bytes.Clone(archives[scope])
+		lock.Unlock()
+		if published.LogicalPath != "/backups/"+scope+"/2026/10/02/fixture.exorecovery" || !bytes.Equal(received, payload) {
 			t.Fatal("archive was not isolated in its service folder", published)
+		}
+		decoded, err := OpenScope(received, "synthetic recovery passphrase "+scope, scope)
+		if err != nil {
+			t.Fatal("transported archive cannot be decrypted", scope, err)
+		}
+		restored := t.TempDir()
+		// A fresh recovery host has Updater installed before any helper restore;
+		// its installer provisions the controller directory for the journal.
+		if err := os.MkdirAll(filepath.Join(restored, "var/lib/updater"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := ApplyScoped(restored, decoded, scope, func() error { return nil }); err != nil {
+			t.Fatal("transported archive cannot be restored", scope, err)
+		}
+		assertHostRecoveryFixture(t, restored, map[string]map[string][]byte{scope: fixture[scope]})
+		for _, fault := range []string{"checksum", "size", "namespace"} {
+			t.Run(scope+"/bad-receipt-"+fault, func(t *testing.T) {
+				lock.Lock()
+				receiptFault[scope] = fault
+				lock.Unlock()
+				_, err := publisher.publish(t.Context(), ScopedArchive{Scope: scope, Bytes: payload}, scope, tokens[scope], "component-0123456789abcdef", "0.6.12", time.Now())
+				if err == nil || !strings.Contains(err.Error(), "receipt does not match") {
+					t.Fatal("mismatching remote receipt was accepted", err)
+				}
+			})
+		}
+		lock.Lock()
+		receiptFault[scope] = ""
+		lock.Unlock()
+		if _, err := publisher.publish(t.Context(), ScopedArchive{Scope: scope, Bytes: payload}, scope, strings.Repeat("x", 43), "component-0123456789abcdef", "0.6.12", time.Now()); err == nil {
+			t.Fatal("another credential uploaded to the service namespace", scope)
 		}
 	}
 }

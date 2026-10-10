@@ -281,7 +281,7 @@ The current six-service deployment, trust, recovery and acceptance contract is d
 ## Unified updates (protocol 2)
 
 See [Update protocol, saved ZIP and first migration](docs/UPDATE-PROTOCOL.md).
-The UI uses Updater **0.6.10**, an exact selected version, the standard ZIP saved
+The UI uses Updater **0.6.14**, an exact selected version, the standard ZIP saved
 on the operator PC, and durable status/progress for application releases.
 Updater, Neptune, Gryphon and Wyvern release operations use the root TUI.
 No update ZIP is retained on the application host.

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.14 — 2026-10-10
+
+- Preserve completed and failed host-owned operation history across scoped and
+  legacy recovery without accepting arbitrary headless job metadata.
+- Verify service-isolated recovery archives end to end, including resumed
+  uploads, remote receipt identity, independent keys and health-check rollback.
+- Permit the Window operator account to run only grant-gated, read-only
+  `window diagnose` commands and surface them in the restricted TUI.
+
 ## 0.6.13 — 2026-10-09
 
 - Add scoped, remotely stored host-recovery archives for Updater, Neptune,
