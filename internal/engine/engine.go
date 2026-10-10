@@ -143,7 +143,11 @@ func (e *Engine) Start(request model.UpdateRequest) (model.Job, error) {
 		return model.Job{}, errors.New("request_id, head_id and service are required")
 	}
 	if previous, ok := e.store.ByRequestID(request.RequestID); ok {
-		if previous.HeadID != request.HeadID || previous.Service != request.Service || previous.Version != request.Version ||
+		versionMismatch := previous.Version != request.Version
+		if previous.RequestedVersion != nil {
+			versionMismatch = *previous.RequestedVersion != request.Version
+		}
+		if previous.HeadID != request.HeadID || previous.Service != request.Service || versionMismatch ||
 			(request.Service == "mastermind" && (previous.BackupSpoolID != request.Backup.SpoolID || previous.PreparationID != request.PreparationID)) ||
 			(request.Service != "mastermind" && previous.BackupSHA256 != request.Backup.SHA256) {
 			return model.Job{}, errors.New("request id is already in use")
@@ -201,16 +205,18 @@ func (e *Engine) Start(request model.UpdateRequest) (model.Job, error) {
 	e.mu.Unlock()
 
 	now := time.Now().UTC()
+	requestedVersion := request.Version
 	job := model.Job{
-		ID:            fmt.Sprintf("%d-%x", now.Unix(), sha256.Sum256([]byte(request.RequestID))),
-		RequestID:     request.RequestID,
-		HeadID:        request.HeadID,
-		Service:       request.Service,
-		PreparationID: request.PreparationID,
-		Version:       request.Version,
-		State:         "REQUESTED",
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:               fmt.Sprintf("%d-%x", now.Unix(), sha256.Sum256([]byte(request.RequestID))),
+		RequestID:        request.RequestID,
+		HeadID:           request.HeadID,
+		Service:          request.Service,
+		RequestedVersion: &requestedVersion,
+		PreparationID:    request.PreparationID,
+		Version:          request.Version,
+		State:            "REQUESTED",
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 	if len(job.ID) > 48 {
 		job.ID = job.ID[:48]

@@ -39,19 +39,20 @@ type NeptuneInitializationRequest struct {
 }
 
 type Job struct {
-	ID             string   `json:"id"`
-	RequestID      string   `json:"request_id"`
-	HeadID         string   `json:"head_id"`
-	Service        string   `json:"service"`
-	Version        string   `json:"version,omitempty"`
-	State          string   `json:"state"`
-	Message        string   `json:"message,omitempty"`
-	BackupPath     string   `json:"backup_path,omitempty"`
-	RecoveryMode   string   `json:"recovery_mode,omitempty"`
-	BackupSHA256   string   `json:"backup_sha256,omitempty"`
-	BackupFilename string   `json:"backup_filename,omitempty"`
-	Progress       Progress `json:"progress"`
-	PreviousImage  string   `json:"previous_image,omitempty"`
+	ID               string   `json:"id"`
+	RequestID        string   `json:"request_id"`
+	HeadID           string   `json:"head_id"`
+	Service          string   `json:"service"`
+	Version          string   `json:"version,omitempty"`
+	RequestedVersion *string  `json:"requested_version,omitempty"`
+	State            string   `json:"state"`
+	Message          string   `json:"message,omitempty"`
+	BackupPath       string   `json:"backup_path,omitempty"`
+	RecoveryMode     string   `json:"recovery_mode,omitempty"`
+	BackupSHA256     string   `json:"backup_sha256,omitempty"`
+	BackupFilename   string   `json:"backup_filename,omitempty"`
+	Progress         Progress `json:"progress"`
+	PreviousImage    string   `json:"previous_image,omitempty"`
 	// PreviousImagePull is the verified immutable registry reference for a
 	// previously running image. Legacy jobs without it keep their local image.
 	PreviousImagePull      string            `json:"previous_image_pull,omitempty"`

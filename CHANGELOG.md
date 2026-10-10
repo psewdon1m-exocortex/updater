@@ -6,6 +6,8 @@
   legacy recovery without accepting arbitrary headless job metadata.
 - Verify service-isolated recovery archives end to end, including resumed
   uploads, remote receipt identity, independent keys and health-check rollback.
+- Keep latest-version update retries idempotent after the selected release has
+  been resolved and recorded on the job.
 - Permit the Window operator account to run only grant-gated, read-only
   `window diagnose` commands and surface them in the restricted TUI.
 

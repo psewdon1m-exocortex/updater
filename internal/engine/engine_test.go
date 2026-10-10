@@ -147,11 +147,24 @@ func TestDryRunDoesNotPersistBackupAndCompletes(t *testing.T) {
 }
 
 func TestIdempotencyAndBackupValidation(t *testing.T) {
-	instance, _, _ := testEngine(t, true)
+	instance, _, store := testEngine(t, true)
 	request := model.UpdateRequest{RequestID: "same", HeadID: "kernel", Service: "kernel", Backup: backup()}
 	first, err := instance.Start(request)
 	if err != nil {
 		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	completed := false
+	for time.Now().Before(deadline) {
+		current, _ := store.Get(first.ID)
+		if current.State == "COMPLETED" {
+			completed = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !completed {
+		t.Fatal("job did not complete before idempotent retry")
 	}
 	second, err := instance.Start(request)
 	if err != nil {
@@ -165,7 +178,7 @@ func TestIdempotencyAndBackupValidation(t *testing.T) {
 	if _, err := instance.Start(request); err == nil {
 		t.Fatal("invalid backup checksum must be rejected")
 	}
-	deadline := time.Now().Add(time.Second)
+	deadline = time.Now().Add(time.Second)
 	for instance.Busy() && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
