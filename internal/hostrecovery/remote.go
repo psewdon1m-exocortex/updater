@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -88,12 +89,57 @@ func (publisher *gatewayPublisher) request(ctx context.Context, method, path, to
 	return publisher.client.Do(request)
 }
 
+type gatewayHTTPError struct {
+	status int
+	body   string
+}
+
+func (err *gatewayHTTPError) Error() string {
+	return fmt.Sprintf("Gateway request failed with status %d: %s", err.status, err.body)
+}
+
 func responseError(response *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-	return fmt.Errorf("Gateway request failed with status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	return &gatewayHTTPError{status: response.StatusCode, body: strings.TrimSpace(string(body))}
+}
+
+func retryableGatewayError(err error) bool {
+	var response *gatewayHTTPError
+	if errors.As(err, &response) {
+		return response.status >= 500 || response.status == http.StatusRequestTimeout || response.status == http.StatusTooManyRequests
+	}
+	var network net.Error
+	return errors.As(err, &network) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+func gatewayRetryWait(ctx context.Context, attempt int) error {
+	timer := time.NewTimer(time.Duration(attempt) * 250 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func retryGateway(ctx context.Context, action func() error) error {
+	for attempt := 0; ; attempt++ {
+		err := action()
+		if err == nil || attempt == 2 || ctx.Err() != nil || !retryableGatewayError(err) {
+			return err
+		}
+		if waitErr := gatewayRetryWait(ctx, attempt+1); waitErr != nil {
+			return waitErr
+		}
+	}
 }
 
 func (publisher *gatewayPublisher) json(ctx context.Context, method, path, token, idempotency string, input any, output any) error {
+	return retryGateway(ctx, func() error { return publisher.jsonOnce(ctx, method, path, token, idempotency, input, output) })
+}
+
+func (publisher *gatewayPublisher) jsonOnce(ctx context.Context, method, path, token, idempotency string, input any, output any) error {
 	var body []byte
 	var reader io.Reader
 	var err error
@@ -121,6 +167,16 @@ func (publisher *gatewayPublisher) json(ctx context.Context, method, path, token
 }
 
 func (publisher *gatewayPublisher) uploadOffset(ctx context.Context, path, token string, expected int) (int, error) {
+	var offset int
+	err := retryGateway(ctx, func() error {
+		var err error
+		offset, err = publisher.uploadOffsetOnce(ctx, path, token, expected)
+		return err
+	})
+	return offset, err
+}
+
+func (publisher *gatewayPublisher) uploadOffsetOnce(ctx context.Context, path, token string, expected int) (int, error) {
 	response, err := publisher.request(ctx, http.MethodHead, path, token, "", nil, 0)
 	if err != nil {
 		return 0, err
@@ -134,6 +190,49 @@ func (publisher *gatewayPublisher) uploadOffset(ctx context.Context, path, token
 		return 0, errors.New("Gateway returned an invalid backup upload offset")
 	}
 	return offset, nil
+}
+
+func (publisher *gatewayPublisher) uploadChunk(ctx context.Context, path, token string, payload []byte, offset int) (int, error) {
+	end := offset + min(publisher.chunk, len(payload)-offset)
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			if err := gatewayRetryWait(ctx, attempt); err != nil {
+				return offset, err
+			}
+			accepted, err := publisher.uploadOffset(ctx, path, token, len(payload))
+			if err != nil {
+				return offset, err
+			}
+			if accepted == end {
+				return end, nil
+			} // The chunk was stored but its response was lost.
+			if accepted != offset {
+				return offset, errors.New("Gateway resumed offset differs from the attempted chunk")
+			}
+		}
+		request, err := http.NewRequestWithContext(ctx, http.MethodPatch, publisher.base+path, bytes.NewReader(payload[offset:end]))
+		if err != nil {
+			return offset, err
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+		request.Header.Set("Content-Type", "application/offset+octet-stream")
+		request.Header.Set("Upload-Offset", fmt.Sprint(offset))
+		request.ContentLength = int64(end - offset)
+		response, err := publisher.client.Do(request)
+		if err == nil {
+			if response.StatusCode >= 200 && response.StatusCode < 300 {
+				response.Body.Close()
+				return end, nil
+			}
+			err = responseError(response)
+			response.Body.Close()
+		}
+		var conflict *gatewayHTTPError
+		resumableConflict := errors.As(err, &conflict) && conflict.status == http.StatusConflict
+		if attempt == 2 || ctx.Err() != nil || (!retryableGatewayError(err) && !resumableConflict) {
+			return offset, err
+		}
+	}
 }
 
 func enrollScopes(ctx context.Context, raw string, client *http.Client, codes map[string]string) (map[string]config.RecoveryIdentity, error) {
@@ -189,7 +288,7 @@ func EnrollScopes(ctx context.Context, raw string, codes map[string]string) (map
 	return enrollScopes(ctx, raw, client, codes)
 }
 
-func (publisher *gatewayPublisher) publish(ctx context.Context, archive ScopedArchive, slug, token, setID, version string, createdAt time.Time) (PublishedArchive, error) {
+func (publisher *gatewayPublisher) publish(ctx context.Context, archive ScopedArchive, slug, token, setID, version string, createdAt time.Time) (published PublishedArchive, publishErr error) {
 	digest := sha256.Sum256(archive.Bytes)
 	checksum := hex.EncodeToString(digest[:])
 	filename := ScopeFilename(archive.Scope, setID)
@@ -205,32 +304,29 @@ func (publisher *gatewayPublisher) publish(ctx context.Context, archive ScopedAr
 	if run.ID == "" {
 		return PublishedArchive{}, errors.New("Gateway returned an invalid backup run")
 	}
+	// The caller records a terminal failed job when publication returns an error.
+	// Cleanup has its own bounded context, including when the upload was cancelled.
+	// If Saturn cannot be reached, its incomplete-run TTL releases the reservation.
+	defer func() {
+		if publishErr == nil {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := publisher.json(cleanupCtx, http.MethodDelete, path+"/"+url.PathEscape(run.ID), token, "", nil, nil); err != nil {
+			publishErr = errors.Join(publishErr, fmt.Errorf("cancel Saturn incomplete backup: %w", err))
+		}
+	}()
 	uploadPath := path + "/" + run.ID + "/upload"
 	offset, err := publisher.uploadOffset(ctx, uploadPath, token, len(archive.Bytes))
 	if err != nil {
 		return PublishedArchive{}, err
 	}
 	for offset < len(archive.Bytes) {
-		length := min(publisher.chunk, len(archive.Bytes)-offset)
-		request, err := http.NewRequestWithContext(ctx, http.MethodPatch, publisher.base+uploadPath, bytes.NewReader(archive.Bytes[offset:offset+length]))
+		offset, err = publisher.uploadChunk(ctx, uploadPath, token, archive.Bytes, offset)
 		if err != nil {
 			return PublishedArchive{}, err
 		}
-		request.Header.Set("Authorization", "Bearer "+token)
-		request.Header.Set("Content-Type", "application/offset+octet-stream")
-		request.Header.Set("Upload-Offset", fmt.Sprint(offset))
-		request.ContentLength = int64(length)
-		response, err := publisher.client.Do(request)
-		if err != nil {
-			return PublishedArchive{}, err
-		}
-		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			err = responseError(response)
-			response.Body.Close()
-			return PublishedArchive{}, err
-		}
-		response.Body.Close()
-		offset += length
 	}
 	var completed backupRun
 	if err := publisher.json(ctx, http.MethodPost, path+"/"+run.ID+"/complete", token, "", map[string]any{}, &completed); err != nil {

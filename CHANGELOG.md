@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.17 — 2026-10-11
+
+- Retry transient Saturn host-recovery requests with bounded backoff while
+  preserving the existing operation deadline.
+- Reconcile lost create, chunk and completion acknowledgements without
+  duplicating uploaded bytes or replacing committed archives.
+- Cancel only the producer's unfinished Saturn reservation after a terminal
+  publication failure, with server-side expiry as the unavailable-host fallback.
+- Qualify discovery through Kernel's machine identity and exercise the real
+  Saturn HTTP, PostgreSQL and filesystem path for every host-recovery scope.
+
 ## 0.6.16 — 2026-10-11
 
 - Send resumable host recovery chunks with `application/offset+octet-stream`

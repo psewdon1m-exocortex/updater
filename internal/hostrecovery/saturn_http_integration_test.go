@@ -41,7 +41,8 @@ func TestActualSaturnHostRecoveryHTTP(t *testing.T) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
 	previous := http.DefaultTransport
-	http.DefaultTransport = transport
+	faultTransport := &recoveryFaultTransport{base: transport, lost: map[string]bool{}}
+	http.DefaultTransport = faultTransport
 	t.Cleanup(func() { http.DefaultTransport = previous; transport.CloseIdleConnections() })
 	response, err := server.Client().Get(server.URL + "/__qa/setup-codes")
 	if err != nil {
@@ -77,6 +78,15 @@ func TestActualSaturnHostRecoveryHTTP(t *testing.T) {
 			}
 			createdAt := time.Now().UTC()
 			setID := "component-http-go-" + scope
+			if scope == "updater" {
+				// Exercise lost create, chunk and completion acknowledgements against Nest/Fastify.
+				// The run UUID is selected by Saturn; match only this producer's upload paths.
+				faultTransport.mu.Lock()
+				faultTransport.lost["POST /api/v1/backups/updater-qa/runs"] = true
+				faultTransport.lost["PATCH /api/v1/backups/updater-qa/runs/*/upload"] = true
+				faultTransport.lost["POST /api/v1/backups/updater-qa/runs/*/complete"] = true
+				faultTransport.mu.Unlock()
+			}
 			published, err := PublishScope(t.Context(), runtime, ScopedArchive{Scope: scope, Bytes: sealed}, setID, createdAt)
 			if err != nil {
 				t.Fatal("real HTTP publisher failed", err)
