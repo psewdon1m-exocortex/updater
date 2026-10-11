@@ -196,7 +196,7 @@ updater tui --demo
 updater tui --no-color --demo
 ```
 
-Each Updater, Neptune, Gryphon and Wyvern screen owns its independent host
+Each Updater, Neptune, Gryphon, Wyvern and Window screen owns its independent host
 recovery pipeline. Create only the identities for services installed on that
 host, then enter that service's one-time setup code in its **Configure … recovery storage** action. Saturn's HTTPS origin comes from Updater's own Kernel Register. A saved origin supports outages; an explicit advanced origin override supports recovery. Updater exchanges each code
 independently and keeps the resulting producer token in a separate root-owned
@@ -209,9 +209,10 @@ backups/updater/<server-id>/<year>/<month>/<day>/...
 backups/neptune/<server-id>/<year>/<month>/<day>/...
 backups/gryphon/<server-id>/<year>/<month>/<day>/...
 backups/wyvern/<server-id>/<year>/<month>/<day>/...
+backups/window/<server-id>/<year>/<month>/<day>/...
 ```
 
-When configured, `updater`, `neptune`, `gryphon` and `wyvern` use distinct
+When configured, `updater`, `neptune`, `gryphon`, `wyvern` and `window` use distinct
 folders directly under `backups`; a missing service needs no empty identity or
 folder. The stable server ID partitions hosts inside each matching folder.
 
@@ -221,6 +222,19 @@ roots and cannot erase neighboring helper state. The former Saturn browser
 form and service-facing Updater host-recovery route are intentionally absent.
 Legacy combined v1 archives remain accepted by the root CLI for migration;
 new exports always use the selected service's scoped format.
+
+Window's recovery contract is identity-only: exactly the public forced-command
+PC pairing in `/var/lib/window-ssh/.ssh/authorized_keys`, or an explicit empty
+identity when unpaired. Restore replaces that identity and verifies the exact
+fingerprint and closed grant through Window's root-only Unix API. Access leases,
+live output, audit/test results, the PC's private key, operator SSH credentials,
+passwords and executable deployment files are excluded. Export briefly restarts
+Window and closes any grant. An older archive may reselect an older paired PC;
+review the identity and open a fresh grant manually after restore. A legacy
+combined archive without Window state preserves the current Window identity.
+These root recovery actions appear in the full `sudo updater tui`, and are
+deliberately absent from the restricted `updater tui -window` operator console.
+See [Window recovery](docs/WINDOW_RECOVERY.md) for compatibility and local checks.
 
 Use arrows, Enter and Esc; Tab moves between form fields. The demo uses
 synthetic data and needs neither root nor installed services. In normal mode,
@@ -281,7 +295,7 @@ The current six-service deployment, trust, recovery and acceptance contract is d
 ## Unified updates (protocol 2)
 
 See [Update protocol, saved ZIP and first migration](docs/UPDATE-PROTOCOL.md).
-The UI uses Updater **0.6.14**, an exact selected version, the standard ZIP saved
+The UI uses Updater **0.6.15**, an exact selected version, the standard ZIP saved
 on the operator PC, and durable status/progress for application releases.
 Updater, Neptune, Gryphon and Wyvern release operations use the root TUI.
 No update ZIP is retained on the application host.

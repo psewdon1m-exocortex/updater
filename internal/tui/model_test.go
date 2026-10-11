@@ -28,7 +28,7 @@ func TestWindowOnlyOperatorCannotNavigateOrSubmitOtherComponents(t *testing.T) {
 		t.Fatal("restricted operator did not open Window directly")
 	}
 	for _, item := range m.menu() {
-		if item.action == "back" {
+		if item.action == "back" || strings.HasPrefix(item.action, "recovery-") {
 			t.Fatal("restricted menu exposes other applications")
 		}
 	}
@@ -40,6 +40,16 @@ func TestWindowOnlyOperatorCannotNavigateOrSubmitOtherComponents(t *testing.T) {
 	m = next.(Model)
 	if m.screen != details || m.pending.Component != "" {
 		t.Fatal("restricted operator opened host Kernel configuration")
+	}
+	for _, action := range []string{"recovery-configure", "recovery-configure-override", "recovery-export", "recovery-key-export", "recovery-restore"} {
+		next, _ := m.choose(action)
+		if restricted := next.(Model); restricted.screen != details || restricted.pending.Recovery != nil {
+			t.Fatal("restricted Window operator opened recovery", action)
+		}
+	}
+	m.pending = console.Action{Component: "window", Kind: "recovery-key-export", Recovery: &console.RecoveryInput{Service: "window", KeyPath: "/var/lib/updater/window-key.json"}}
+	if _, command := m.submit(); command != nil {
+		t.Fatal("restricted Window operator exported a recovery key")
 	}
 	m.pending = console.Action{Component: "updater", Kind: "update"}
 	m.screen = confirm
@@ -111,7 +121,7 @@ func TestCredentialFormPasteResizeAndCancel(t *testing.T) {
 }
 
 func TestRecoveryConfigurationIsIndependentAndMaskedForEveryHostService(t *testing.T) {
-	for selected, service := range []string{"updater", "neptune", "gryphon", "wyvern"} {
+	for selected, service := range []string{"updater", "neptune", "gryphon", "wyvern", "window"} {
 		m := loaded()
 		m.selected = selected
 		found := map[string]bool{}

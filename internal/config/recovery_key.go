@@ -17,9 +17,7 @@ type recoveryKey struct {
 }
 
 func recoveryKeyPath(runtime Runtime, service string) (string, error) {
-	switch service {
-	case "updater", "neptune", "gryphon", "wyvern":
-	default:
+	if !validRecoveryService(service) {
 		return "", errors.New("unknown recovery service")
 	}
 	return filepath.Join(runtime.StateDir, "recovery-keys", service+".json"), nil

@@ -132,6 +132,9 @@ func (m Model) menu() []menuItem {
 		} else {
 			items = append(items, menuItem{"Install Window on this host", "install"})
 		}
+		if !m.windowOnly {
+			items = append(items, m.recoveryMenu()...)
+		}
 		items = append(items, menuItem{"Operation history", "jobs"})
 		items = append(items, menuItem{"Help / diagnostics", "help"})
 		if !m.windowOnly {
@@ -145,12 +148,7 @@ func (m Model) menu() []menuItem {
 			menuItem{"Review Docker image storage", "images"},
 		)
 	}
-	if m.selected < 4 {
-		items = append(items, menuItem{"Configure " + title(m.component().ID) + " recovery storage", "recovery-configure"}, menuItem{"Advanced: recovery Saturn origin override", "recovery-configure-override"})
-		if m.component().Installed {
-			items = append(items, menuItem{"Create " + title(m.component().ID) + " recovery archive", "recovery-export"}, menuItem{"Restore " + title(m.component().ID) + " recovery archive", "recovery-restore"}, menuItem{"Export recovery key to private file", "recovery-key-export"}, menuItem{"Restore legacy archive with passphrase", "recovery-restore-legacy"})
-		}
-	}
+	items = append(items, m.recoveryMenu()...)
 	if m.selected < 3 {
 		if m.component().Installed {
 			items = append(items, menuItem{"Check for updates", "check"})
@@ -553,7 +551,7 @@ func (m Model) choose(action string) (tea.Model, tea.Cmd) {
 		m.screen, m.cursor = form, 0
 		return m, textinput.Blink
 	}
-	if m.selected < 4 && strings.HasPrefix(action, "recovery-") {
+	if !m.windowOnly && strings.HasPrefix(action, "recovery-") {
 		m.choice = action
 		service := m.component().ID
 		m.pending = console.Action{Component: service, Kind: action, Recovery: &console.RecoveryInput{Service: service}}
@@ -938,6 +936,17 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		}
 		return replyMsg{generation: generation, kind: "action", job: &job, err: err}
 	}
+}
+
+func (m Model) recoveryMenu() []menuItem {
+	items := []menuItem{{"Configure " + title(m.component().ID) + " recovery storage", "recovery-configure"}, {"Advanced: recovery Saturn origin override", "recovery-configure-override"}}
+	if m.component().Installed {
+		items = append(items, menuItem{"Create " + title(m.component().ID) + " recovery archive", "recovery-export"}, menuItem{"Restore " + title(m.component().ID) + " recovery archive", "recovery-restore"}, menuItem{"Export recovery key to private file", "recovery-key-export"})
+		if m.component().ID != "window" {
+			items = append(items, menuItem{"Restore legacy archive with passphrase", "recovery-restore-legacy"})
+		}
+	}
+	return items
 }
 
 func windowOperatorAction(kind string) bool {

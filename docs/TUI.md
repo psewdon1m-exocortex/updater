@@ -67,6 +67,11 @@ sudoers rule allowing only `updater tui -window`, Window key pairing,
 bounded test capture and grant-gated `window diagnose` read operations. A new
 account starts with password login disabled; root sets its password or installs
 an SSH public key before the first Termius login.
+Window recovery storage, archive creation/restoration and private key export
+are available only in the full root TUI. Recovery restores only the public PC
+pairing, including an unpaired snapshot, and always closes the grant. The
+restricted `windowops` console deliberately excludes these recovery actions.
+
 The restricted TUI opens directly in Window, cannot navigate to other
 components and still uses the same root-owned operator socket. The technical
 `window` account remains the forced-command MCP reader.

@@ -26,8 +26,11 @@ func recoveryUnits(includeUpdater bool) []string {
 	return append(result, runningHelpers()...)
 }
 
-func recordRecoveryUnits(unitsToRestore []string) error {
+func recordRecoveryUnits(unitsToRestore []string, scope ...string) error {
 	body, _ := json.Marshal(unitsToRestore)
+	if len(scope) == 1 && scope[0] == "window" {
+		body, _ = json.Marshal(windowRecoveryUnits{Scope: "window", Units: unitsToRestore})
+	}
 	if err := durableFile(activeHelpersFile, body); err != nil {
 		return err
 	}
@@ -55,6 +58,11 @@ func ExportScopes(password string) (archives []ScopedArchive, err error) {
 		return nil, err
 	}
 	for _, scope := range RecoveryScopes {
+		// Existing combined jobs retain their four-scope contract. Window
+		// enrollment, key and quiescing belong only to its independent pipeline.
+		if scope == "window" {
+			continue
+		}
 		entries, collectErr := CollectScope("/", scope)
 		if collectErr != nil {
 			return nil, collectErr
@@ -85,7 +93,7 @@ func ExportScope(password, scope string) (archive ScopedArchive, err error) {
 	if runningUnit(unit) {
 		running = append(running, unit)
 	}
-	if err = recordRecoveryUnits(running); err != nil {
+	if err = recordRecoveryUnits(running, scope); err != nil {
 		return ScopedArchive{}, err
 	}
 	defer func() {
@@ -148,7 +156,7 @@ func RestoreScope(archive []byte, password, expectedScope string) error {
 	if PendingHostRecovery() {
 		return errors.New("an interrupted host recovery must be resumed first")
 	}
-	if err := recordRecoveryUnits(running); err != nil {
+	if err := recordRecoveryUnits(running, expectedScope); err != nil {
 		return err
 	}
 	defer func() {
@@ -165,16 +173,19 @@ func RestoreScope(archive []byte, password, expectedScope string) error {
 			return err
 		}
 		if err := units("start", []string{unit}); err != nil {
+			_ = units("stop", []string{unit})
 			return err
 		}
 		if expectedScope != "updater" {
-			if err := health(unit); err != nil {
+			if err := health(unit, entries...); err != nil {
 				_ = units("stop", []string{unit})
 				return err
 			}
-			if err := reconnectHeads(); err != nil {
-				_ = units("stop", []string{unit})
-				return err
+			if expectedScope != "window" {
+				if err := reconnectHeads(); err != nil {
+					_ = units("stop", []string{unit})
+					return err
+				}
 			}
 		}
 		return nil
@@ -182,7 +193,7 @@ func RestoreScope(archive []byte, password, expectedScope string) error {
 	if err != nil {
 		_ = ownershipForRoots(scopedRoots[expectedScope])
 		_ = units("start", running)
-		if expectedScope != "updater" {
+		if expectedScope != "updater" && expectedScope != "window" {
 			_ = reconnectHeads()
 		}
 		return err

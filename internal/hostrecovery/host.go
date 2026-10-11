@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -52,16 +53,21 @@ func PendingHostRecovery() bool {
 	return PendingRecovery("/") || err == nil
 }
 func ResumeInterruptedHost() error {
-	running := runningHelpers()
+	var saved []string
+	windowOnly := false
 	if body, err := os.ReadFile(activeHelpersFile); err == nil {
-		var saved []string
-		if len(body) > 1024 || json.Unmarshal(body, &saved) != nil {
-			return errors.New("invalid helper restart journal")
+		var decodeErr error
+		saved, windowOnly, decodeErr = decodeRecoveryUnits(body)
+		if decodeErr != nil {
+			return decodeErr
 		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	running := saved
+	if !windowOnly {
+		running = runningHelpers()
 		for _, unit := range saved {
-			if unit != "updater.service" && unit != "neptune.service" && unit != "gryphon.service" && unit != "wyvern.service" {
-				return errors.New("invalid helper restart unit")
-			}
 			found := false
 			for _, current := range running {
 				if current == unit {
@@ -73,14 +79,25 @@ func ResumeInterruptedHost() error {
 			}
 		}
 	}
-	if err := units("stop", running); err != nil {
+	toStop := running
+	if windowOnly {
+		// A previously inactive broker may already have been started during
+		// verification. Stop it before rollback; only restart its saved state.
+		toStop = []string{"window.service"}
+	}
+	if err := units("stop", toStop); err != nil {
 		return err
 	}
 	if err := RecoverInterrupted("/"); err != nil {
 		return err
 	}
-	if err := errors.Join(units("start", running), reconnectHeads()); err != nil {
+	if err := units("start", running); err != nil {
 		return err
+	}
+	if !windowOnly {
+		if err := reconnectHeads(); err != nil {
+			return err
+		}
 	}
 	if err := os.Remove(activeHelpersFile); err != nil && !os.IsNotExist(err) {
 		return err
@@ -210,6 +227,14 @@ func ownershipForRoots(selected []string) error {
 					mode = 0750
 				}
 			}
+			// sshd switches to the dedicated window account before reading the
+			// public pairing. Only root may write; the reader needs traversal.
+			if root == windowPairingRoot {
+				mode = 0644
+				if entry.IsDir() {
+					mode = 0755
+				}
+			}
 			return os.Chmod(filename, mode)
 		})
 		if err != nil {
@@ -219,8 +244,8 @@ func ownershipForRoots(selected []string) error {
 	return nil
 }
 
-func ownership() error { return ownershipForRoots(roots) }
-func health(unit string) error {
+func ownership() error { return ownershipForRoots(legacyRoots) }
+func health(unit string, entries ...Entry) error {
 	socket, host := "/run/neptune/neptuned.sock", "neptune.local"
 	route := "/v1/health"
 	if unit == "wyvern.service" {
@@ -228,6 +253,9 @@ func health(unit string) error {
 	}
 	if unit == "gryphon.service" {
 		socket, host = "/run/gryphon/client.sock", "gryphon.local"
+	}
+	if unit == "window.service" {
+		socket, host, route = "/run/window-admin/admin.sock", "window.local", "/v1/status"
 	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "unix", socket)
@@ -237,8 +265,13 @@ func health(unit string) error {
 	for attempt := 0; attempt < 30; attempt++ {
 		response, err := client.Get("http://" + host + route)
 		if err == nil {
+			valid := true
+			if unit == "window.service" {
+				body, readErr := io.ReadAll(io.LimitReader(response.Body, 8193))
+				valid = readErr == nil && len(body) <= 8192 && windowRecoveryStatus(body, entries) == nil
+			}
 			response.Body.Close()
-			if response.StatusCode == 200 {
+			if response.StatusCode == 200 && valid {
 				return nil
 			}
 		}
@@ -310,7 +343,7 @@ func Restore(archive []byte, password string) error {
 			return err
 		}
 		for _, unit := range wanted {
-			if err := health(unit); err != nil {
+			if err := health(unit, entries...); err != nil {
 				_ = units("stop", wanted)
 				return err
 			}

@@ -218,7 +218,7 @@ func (m Model) rows() []row {
 				add("Kernel access: " + m.snapshot.KernelAccess)
 			}
 		}
-		if component.ID != "window" {
+		if !m.windowOnly {
 			if recoveryConfigured(m.snapshot, component.ID) {
 				add(title(component.ID) + " recovery storage: " + m.snapshot.RecoveryGatewayURL + " (configured independently)")
 			} else {
@@ -333,6 +333,10 @@ func (m Model) rows() []row {
 		}
 		if m.pending.Kind == "recovery-restore" {
 			add("Current state is transactionally replaced only for the selected service and rolled back if verification fails.")
+		}
+		if m.pending.Component == "window" && m.pending.Recovery != nil {
+			add("Only the public PC pairing is included. Grants, live output and operator SSH credentials are excluded.")
+			add("Window restarts with access closed. Restore replaces the paired PC, including an unpaired snapshot.")
 		}
 		if m.pending.Component == "wyvern" {
 			if m.pending.Wyvern != nil {

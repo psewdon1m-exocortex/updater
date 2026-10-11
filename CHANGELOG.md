@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.15 — 2026-10-11
+
+- Add an independent Window recovery scope that preserves only its canonical
+  forced-command public pairing, including an explicit unpaired snapshot.
+- Verify restored Window identity and closed access through the broker API,
+  with transactional rollback and interruption recovery isolated from sibling
+  host services.
+- Expose Window recovery only in the full root operator TUI, retain the legacy
+  four-scope archive contract and document the qualification procedure.
+
 ## 0.6.14 — 2026-10-10
 
 - Preserve completed and failed host-owned operation history across scoped and

@@ -129,7 +129,7 @@ type Backend interface {
 }
 
 func ValidateAction(a Action) error {
-	recoveryService := a.Component == "updater" || a.Component == "neptune" || a.Component == "gryphon" || a.Component == "wyvern"
+	recoveryService := a.Component == "updater" || a.Component == "neptune" || a.Component == "gryphon" || a.Component == "wyvern" || a.Component == "window"
 	if recoveryService && strings.HasPrefix(a.Kind, "recovery-") {
 		if a.HeadID != "" || a.Version != "" || a.ExportURL != "" || a.SetupCode != "" || a.Alias != "" || a.BotToken != "" || a.RepositoryURL != "" || a.KernelURL != "" || a.KernelTokenFile != "" || a.HostID != "" || a.Wyvern != nil || a.PublicKey != "" || a.Minutes != 0 || a.Recovery == nil {
 			return errors.New("Unexpected recovery action fields")

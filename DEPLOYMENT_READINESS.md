@@ -1,5 +1,23 @@
 # updater deployment and recovery contract
 
+## 0.6.15 Window identity recovery
+
+Updater 0.6.15 gives Window an independent root-operated Saturn recovery
+identity, managed encryption key and scoped archive. Only the canonical public
+MCP pairing is restored, including an explicitly unpaired snapshot. Grant,
+lease and live state remain ephemeral; verification requires the expected
+fingerprint and closed access. The restricted `windowops` TUI cannot import
+archives or export keys. Legacy combined exports retain their original
+four-scope contract.
+
+Local qualification includes all five host scopes, malformed payload rejection,
+resumable transport/receipt checks, sibling isolation, rollback and interrupted
+restore, plus the real Window broker in a disposable Linux container. That
+rehearsal simulates systemd lifecycle; actual systemd/OpenSSH and an external
+Saturn deployment are still `NOT_RUN` for this extension. See
+[Window recovery](docs/WINDOW_RECOVERY.md). Release publication does not by
+itself declare the production deployment qualified.
+
 ## 0.6.14 host operation recovery and Window diagnostics
 
 Updater 0.6.14 preserves completed and failed host-owned operation history in

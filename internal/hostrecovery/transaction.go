@@ -46,8 +46,13 @@ func fixedRoot(root, relative string) (string, error) {
 	if !valid {
 		return "", errors.New("invalid recovery transaction root")
 	}
-	// rooted checks every existing ancestor; the suffix is only used for validation.
-	if _, err := rooted(root, relative+"/validation"); err != nil {
+	// Use an allow-listed probe to check every existing ancestor; Window's
+	// directory accepts only the canonical public authorized_keys member.
+	probe := relative + "/validation"
+	if relative == windowPairingRoot {
+		probe = windowPairingFile
+	}
+	if _, err := rooted(root, probe); err != nil {
 		return "", err
 	}
 	return filepath.Join(root, filepath.FromSlash(relative)), nil
@@ -124,7 +129,7 @@ func RecoverInterrupted(root string) error {
 // Apply stages and fsyncs every file before mutation. Previous directories are
 // retained until verification; the journal enables automatic restart recovery.
 func Apply(root string, entries []Entry, verify func() error) error {
-	return applyRoots(root, entries, roots, verify)
+	return applyRoots(root, entries, legacyRoots, verify)
 }
 
 // ApplyScoped is the service-isolated form of Apply. It deliberately excludes
@@ -133,6 +138,11 @@ func ApplyScoped(root string, entries []Entry, scope string, verify func() error
 	selected, ok := scopedRoots[scope]
 	if !ok {
 		return errors.New("unknown helper recovery scope")
+	}
+	if scope == "window" {
+		if err := validateWindowEntries(entries); err != nil {
+			return err
+		}
 	}
 	return applyRoots(root, entries, selected, verify)
 }
@@ -207,7 +217,7 @@ func applyRoots(root string, entries []Entry, selected []string, verify func() e
 		}
 		// Older combined archives have no Wyvern state and must preserve a
 		// separately installed gateway rather than erase its current identities.
-		if len(selected) == len(roots) && !included {
+		if len(selected) == len(legacyRoots) && !included {
 			position := -1
 			for index, candidate := range roots {
 				if candidate == relative {

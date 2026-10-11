@@ -255,6 +255,9 @@ func PublishScopes(ctx context.Context, runtime config.Runtime, archives []Scope
 	}
 	result := []PublishedArchive{}
 	for _, scope := range RecoveryScopes {
+		if scope == "window" {
+			continue // Legacy combined jobs never require a new Window identity.
+		}
 		var selected *ScopedArchive
 		for index := range archives {
 			if archives[index].Scope == scope {

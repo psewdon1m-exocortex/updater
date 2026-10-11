@@ -25,7 +25,8 @@ import (
 const MaxBytes = 128 * 1024 * 1024
 const magic = "EXOCORTEX-HELPER-RECOVERY-1\n"
 
-var roots = []string{"etc/neptune", "etc/gryphon", "var/lib/neptune", "var/lib/gryphon", "var/lib/updater/jobs", "var/lib/updater/backups", "etc/wyvern/identity", "etc/exocortex/wyvern", "var/lib/wyvern"}
+var legacyRoots = []string{"etc/neptune", "etc/gryphon", "var/lib/neptune", "var/lib/gryphon", "var/lib/updater/jobs", "var/lib/updater/backups", "etc/wyvern/identity", "etc/exocortex/wyvern", "var/lib/wyvern"}
+var roots = append(append([]string{}, legacyRoots...), windowPairingRoot)
 
 var recoveryJobHead = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 var legacyHostJobService = regexp.MustCompile(`^(?:host-recovery(?:-[a-z]+)?|(?:updater|neptune|gryphon|wyvern|window)(?:-[a-z]+)?)$`)
@@ -52,6 +53,9 @@ type Entry struct {
 func allowed(name string) bool {
 	if name == "" || strings.ContainsAny(name, "\\\x00:") || path.Clean(name) != name || strings.HasPrefix(name, "/") {
 		return false
+	}
+	if strings.HasPrefix(name, windowPairingRoot+"/") {
+		return name == windowPairingFile
 	}
 	for _, root := range roots {
 		if strings.HasPrefix(name, root+"/") {
@@ -86,7 +90,7 @@ func Seal(entries []Entry, password string) ([]byte, error) {
 	total := 0
 	seen := map[string]bool{}
 	for _, entry := range entries {
-		if !allowed(entry.Name) || seen[entry.Name] {
+		if !allowed(entry.Name) || !selectedRoot(entry.Name, legacyRoots) || seen[entry.Name] {
 			return nil, errors.New("invalid or duplicate recovery entry")
 		}
 		seen[entry.Name] = true
@@ -162,7 +166,7 @@ func Open(encrypted []byte, password string) ([]Entry, error) {
 	seen := map[string]bool{}
 	total := 0
 	for _, file := range reader.File {
-		if !allowed(file.Name) || seen[file.Name] || file.Mode()&os.ModeType != 0 || file.UncompressedSize64 > MaxBytes {
+		if !allowed(file.Name) || !selectedRoot(file.Name, legacyRoots) || seen[file.Name] || file.Mode()&os.ModeType != 0 || file.UncompressedSize64 > MaxBytes {
 			return nil, errors.New("invalid helper archive member")
 		}
 		seen[file.Name] = true
@@ -189,6 +193,9 @@ func Open(encrypted []byte, password string) ([]Entry, error) {
 }
 
 func validateData(entry Entry) error {
+	if strings.HasPrefix(entry.Name, windowPairingRoot+"/") {
+		return validateWindowEntries([]Entry{entry})
+	}
 	if strings.HasPrefix(entry.Name, "etc/") {
 		if strings.HasSuffix(entry.Name, ".env") {
 			for _, line := range strings.Split(string(entry.Data), "\n") {
@@ -277,4 +284,4 @@ func collectRoots(root string, selected []string) ([]Entry, error) {
 	return entries, nil
 }
 
-func Collect(root string) ([]Entry, error) { return collectRoots(root, roots) }
+func Collect(root string) ([]Entry, error) { return collectRoots(root, legacyRoots) }

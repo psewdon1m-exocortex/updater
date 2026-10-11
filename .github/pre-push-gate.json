@@ -11,7 +11,10 @@
       "evidence": [
         "DEPLOYMENT_READINESS.md",
         "internal/hostrecovery/archive.go",
-        "internal/hostrecovery/transaction.go"
+        "internal/hostrecovery/transaction.go",
+        "internal/hostrecovery/window.go",
+        "internal/hostrecovery/window_test.go",
+        "docs/WINDOW_RECOVERY.md"
       ]
     },
     "service_update": {

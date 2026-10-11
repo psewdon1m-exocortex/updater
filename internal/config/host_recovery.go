@@ -11,7 +11,16 @@ import (
 )
 
 var recoveryTokenPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
-var recoveryServices = []string{"updater", "neptune", "gryphon", "wyvern"}
+var recoveryServices = []string{"updater", "neptune", "gryphon", "wyvern", "window"}
+
+func validRecoveryService(service string) bool {
+	for _, candidate := range recoveryServices {
+		if candidate == service {
+			return true
+		}
+	}
+	return false
+}
 
 type RecoveryIdentity struct {
 	Slug  string
@@ -26,11 +35,7 @@ func SaveRecoveryStorage(runtime Runtime, gatewayURL string, identities map[stri
 		return errors.New("at least one recovery identity is required")
 	}
 	for service, identity := range identities {
-		known := false
-		for _, candidate := range recoveryServices {
-			known = known || service == candidate
-		}
-		if !known {
+		if !validRecoveryService(service) {
 			return fmt.Errorf("unknown recovery service %q", service)
 		}
 		if !hostIdentifier.MatchString(identity.Slug) {

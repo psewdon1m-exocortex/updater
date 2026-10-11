@@ -58,6 +58,8 @@ func TestScopedRecoveryActionsAreRootOperatorOnlyAndFullySpecified(t *testing.T)
 		{Component: "updater", Kind: "recovery-configure", Recovery: &RecoveryInput{GatewayURL: "https://saturn.example", Service: "updater", EnrollmentCodes: updaterCode}},
 		{Component: "neptune", Kind: "recovery-export", Recovery: &RecoveryInput{Service: "neptune", Confirmation: "CREATE NEPTUNE RECOVERY"}},
 		{Component: "gryphon", Kind: "recovery-restore", Recovery: &RecoveryInput{ArchivePath: "/root/recovery/gryphon.exorecovery", Service: "gryphon", Passphrase: "sixteen-byte-passphrase", Confirmation: "RESTORE GRYPHON"}},
+		{Component: "window", Kind: "recovery-export", Recovery: &RecoveryInput{Service: "window", Confirmation: "CREATE WINDOW RECOVERY"}},
+		{Component: "window", Kind: "recovery-restore", Recovery: &RecoveryInput{Service: "window", ArchivePath: "/run/recovery/window.exorecovery", KeyPath: "/var/lib/updater/window-offline-key.json", Confirmation: "RESTORE WINDOW"}},
 	} {
 		if err := ValidateAction(action); err != nil {
 			t.Fatalf("valid recovery action rejected: %s: %v", action.Kind, err)

@@ -25,15 +25,16 @@ var scopedRoots = map[string][]string{
 	"neptune": {"etc/neptune", "var/lib/neptune"},
 	"gryphon": {"etc/gryphon", "var/lib/gryphon"},
 	"wyvern":  {"etc/wyvern/identity", "etc/exocortex/wyvern", "var/lib/wyvern"},
+	"window":  {windowPairingRoot},
 }
 
-var RecoveryScopes = []string{"updater", "neptune", "gryphon", "wyvern"}
+var RecoveryScopes = []string{"updater", "neptune", "gryphon", "wyvern", "window"}
 
 func ValidScope(scope string) bool { _, ok := scopedRoots[scope]; return ok }
 
 func allowedForScope(scope, name string) bool {
 	for _, root := range scopedRoots[scope] {
-		if strings.HasPrefix(name, root+"/") {
+		if allowed(name) && strings.HasPrefix(name, root+"/") {
 			return true
 		}
 	}
@@ -45,7 +46,20 @@ func CollectScope(root, scope string) ([]Entry, error) {
 	if !ok {
 		return nil, errors.New("unknown helper recovery scope")
 	}
+	if scope == "window" {
+		if _, err := rooted(root, windowPairingFile); err != nil {
+			return nil, err
+		}
+	}
 	entries, err := collectRoots(root, selected)
+	if err == nil && scope == "window" {
+		// An explicit empty identity restores the unpaired state and removes a
+		// later pairing; an empty archive must never silently preserve access.
+		if len(entries) == 0 {
+			entries = []Entry{{Name: windowPairingFile}}
+		}
+		return entries, validateWindowEntries(entries)
+	}
 	if err != nil || scope != "updater" {
 		return entries, err
 	}
@@ -78,6 +92,11 @@ func scopedHeader(scope string, salt, nonce []byte) []byte {
 func SealScope(entries []Entry, password, scope string) ([]byte, error) {
 	if !ValidScope(scope) {
 		return nil, errors.New("unknown helper recovery scope")
+	}
+	if scope == "window" {
+		if err := validateWindowEntries(entries); err != nil {
+			return nil, err
+		}
 	}
 	if len(password) < 16 || len(password) > 1024 {
 		return nil, errors.New("recovery passphrase must contain 16 to 1024 bytes")
@@ -217,6 +236,11 @@ func OpenScope(encrypted []byte, password, expectedScope string) ([]Entry, error
 			return nil, err
 		}
 		entries = append(entries, entry)
+	}
+	if scope == "window" {
+		if err := validateWindowEntries(entries); err != nil {
+			return nil, err
+		}
 	}
 	return entries, nil
 }

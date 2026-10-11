@@ -177,7 +177,7 @@ func TestRecoveryStorageConfigurationExistsOnlyOnRootOperatorAPI(t *testing.T) {
 		}
 		return identities, nil
 	}
-	services := []string{"updater", "neptune", "gryphon", "wyvern"}
+	services := []string{"updater", "neptune", "gryphon", "wyvern", "window"}
 	var bodies []string
 	for _, service := range services {
 		body, err := json.Marshal(console.Action{
@@ -221,7 +221,7 @@ func TestRecoveryStorageConfigurationExistsOnlyOnRootOperatorAPI(t *testing.T) {
 }
 
 func TestRecoveryKeyExportNeverReturnsTheKeyAndIsPrivateToRoot(t *testing.T) {
-	for _, service := range []string{"updater", "neptune", "gryphon", "wyvern"} {
+	for _, service := range []string{"updater", "neptune", "gryphon", "wyvern", "window"} {
 		t.Run(service, func(t *testing.T) { testRecoveryKeyExport(t, service) })
 	}
 }

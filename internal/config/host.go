@@ -63,7 +63,7 @@ func validateHost(cfg HostConfig) error {
 		return errors.New("recovery Gateway URL must be HTTPS without userinfo, query or fragment")
 	}
 	for service, tokenFile := range cfg.RecoveryTokenFiles {
-		if service != "updater" && service != "neptune" && service != "gryphon" && service != "wyvern" {
+		if !validRecoveryService(service) {
 			return fmt.Errorf("unknown recovery service %q", service)
 		}
 		if !filepath.IsAbs(tokenFile) {
@@ -71,7 +71,7 @@ func validateHost(cfg HostConfig) error {
 		}
 	}
 	for service, slug := range cfg.RecoverySlugs {
-		if service != "updater" && service != "neptune" && service != "gryphon" && service != "wyvern" {
+		if !validRecoveryService(service) {
 			return fmt.Errorf("unknown recovery service %q", service)
 		}
 		if !hostIdentifier.MatchString(slug) {

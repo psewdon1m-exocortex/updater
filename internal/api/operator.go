@@ -18,6 +18,7 @@ import (
 	"updater/internal/component"
 	"updater/internal/config"
 	"updater/internal/console"
+	"updater/internal/hostrecovery"
 	"updater/internal/imagecache"
 	"updater/internal/kernel"
 	"updater/internal/model"
@@ -182,7 +183,7 @@ func (s Server) operatorSnapshot(ctx context.Context) console.Snapshot {
 	if hostConfig, err := config.LoadHost(s.Runtime); err == nil {
 		result.KernelURL, result.KernelTokenFile, result.HostID = console.Text(hostConfig.KernelURL), console.Text(hostConfig.KernelTokenFile), console.Text(hostConfig.HostID)
 		result.RecoveryGatewayURL = console.Text(hostConfig.RecoveryGatewayURL)
-		for _, service := range []string{"updater", "neptune", "gryphon", "wyvern"} {
+		for _, service := range hostrecovery.RecoveryScopes {
 			if hostConfig.RecoveryTokenFiles[service] != "" && hostConfig.RecoverySlugs[service] != "" {
 				result.RecoveryServices = append(result.RecoveryServices, service)
 			}
@@ -322,7 +323,7 @@ func operatorJob(job model.Job) console.Job {
 		headID = ""
 	}
 	componentID := jobComponent(job.Service)
-	if strings.HasPrefix(job.Service, "host-recovery") && (job.HeadID == "updater" || job.HeadID == "neptune" || job.HeadID == "gryphon" || job.HeadID == "wyvern") {
+	if strings.HasPrefix(job.Service, "host-recovery") && hostrecovery.ValidScope(job.HeadID) {
 		componentID = job.HeadID
 		headID = ""
 	}
@@ -338,7 +339,7 @@ func (s Server) operatorAction(w http.ResponseWriter, r *http.Request) {
 		s.operatorWindowAction(w, r, action)
 		return
 	}
-	if (action.Component == "updater" || action.Component == "neptune" || action.Component == "gryphon" || action.Component == "wyvern") && strings.HasPrefix(action.Kind, "recovery-") {
+	if hostrecovery.ValidScope(action.Component) && strings.HasPrefix(action.Kind, "recovery-") {
 		s.operatorRecoveryAction(w, r, action)
 		return
 	}

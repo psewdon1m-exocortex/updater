@@ -36,6 +36,7 @@ func hostRecoveryFixture(phase string) map[string]map[string][]byte {
 			"etc/exocortex/wyvern/clients/mastermind/link.json": []byte(fmt.Sprintf(`{"token":%q}`, "synthetic-secret-"+phase)),
 			"var/lib/wyvern/media.json":                         []byte(fmt.Sprintf(`{"records":[],"fixture":%q}`, phase)),
 		},
+		"window": {windowPairingFile: syntheticWindowPairing(phase)},
 	}
 }
 
@@ -151,7 +152,7 @@ func TestOtherHostRecoveryScopesIgnoreInvalidUpdaterHistory(t *testing.T) {
 	if _, err := CollectScope(root, "updater"); err == nil || !strings.Contains(err.Error(), "component-fixture.json") {
 		t.Fatal("damaged Updater history was silently omitted", err)
 	}
-	for _, scope := range []string{"neptune", "gryphon", "wyvern"} {
+	for _, scope := range []string{"neptune", "gryphon", "wyvern", "window"} {
 		t.Run(scope, func(t *testing.T) {
 			entries, err := CollectScope(root, scope)
 			if err != nil {

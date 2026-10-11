@@ -145,7 +145,7 @@ func TestGatewayPublisherCreatesOneNamespacePerService(t *testing.T) {
 	fixture := hostRecoveryFixture("snapshot")
 	writeHostRecoveryFixture(t, root, fixture)
 	for _, scope := range RecoveryScopes {
-		tokens[scope] = strings.Repeat(scope[:1], 43)
+		tokens[scope] = strings.Repeat(scope[:1], 43-len(scope)) + scope
 		entries, err := CollectScope(root, scope)
 		if err != nil {
 			t.Fatal(scope, err)
@@ -291,7 +291,7 @@ func TestRecoveryEnrollmentBindsEachCodeToItsExpectedNamespace(t *testing.T) {
 		_ = json.NewDecoder(request.Body).Decode(&input)
 		for _, scope := range RecoveryScopes {
 			if input["code"] == codes[scope] {
-				_ = json.NewEncoder(response).Encode(map[string]string{"slug": scope + "-server-a", "namespaceSlug": scope, "token": strings.Repeat(scope[:1], 43)})
+				_ = json.NewEncoder(response).Encode(map[string]string{"slug": scope + "-server-a", "namespaceSlug": scope, "token": strings.Repeat(scope[:1], 43-len(scope)) + scope})
 				return
 			}
 		}
@@ -299,7 +299,7 @@ func TestRecoveryEnrollmentBindsEachCodeToItsExpectedNamespace(t *testing.T) {
 	}))
 	defer server.Close()
 	for _, scope := range RecoveryScopes {
-		codes[scope] = strings.Repeat(scope[:1], 32)
+		codes[scope] = strings.Repeat(scope[:1], 32-len(scope)) + scope
 	}
 	identities, err := enrollScopes(t.Context(), server.URL, server.Client(), codes)
 	if err != nil {
