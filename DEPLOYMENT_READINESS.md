@@ -1,5 +1,31 @@
 # updater deployment and recovery contract
 
+## 0.6.16 host recovery HTTP correction
+
+All five scopes share the same publisher. Its PATCH requests now explicitly
+declare `Content-Type: application/offset+octet-stream`; missing content type
+caused Saturn HTTP 415 after successful enrollment on Updater 0.6.15.
+The strict transport regression rejects a missing header. The disposable Saturn
+HTTP fixture also verifies missing/unsupported media types accept no bytes,
+resume offsets, namespace isolation and real local filesystem commit.
+The tagged Go test in `internal/hostrecovery/saturn_http_integration_test.go`
+exercises production enrollment, private credential persistence, capabilities,
+publication, completed replay, download, SHA-256, decryption and isolated restore
+against the actual Nest/Fastify server for all five scopes.
+
+Run the cross-service check from the Saturn checkout with
+`UPDATER_HTTP_TEST_SOURCE` set to the absolute Updater checkout path:
+`pnpm --filter @saturn/api exec vitest run src/host-recovery-http.integration.test.ts --reporter=verbose`.
+It requires local Docker and the Go test image/cache. The fixture uses synthetic
+credentials and real filesystem storage. Metadata is in-memory by default;
+setting `SATURN_HOST_RECOVERY_TEST_DATABASE_URL` to a disposable local database
+selects the real PostgreSQL repository in a unique migrated schema, removed
+after the test. Both modes passed locally for all five scopes. Production SFTP,
+systemd lifecycle and the production host remain unqualified by this fixture.
+Release publication does not by itself qualify production SFTP, systemd or the
+production host. Existing managed keys and Saturn enrollment remain valid;
+reconnecting does not repair a 415.
+
 ## 0.6.15 Window identity recovery
 
 Updater 0.6.15 gives Window an independent root-operated Saturn recovery

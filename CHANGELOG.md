@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.16 — 2026-10-11
+
+- Send resumable host recovery chunks with `application/offset+octet-stream`
+  so Saturn accepts uploads from every host service, including Window.
+- Qualify the Go publisher against Saturn's actual Nest/Fastify HTTP server,
+  covering independent enrollment, stored bytes, receipt checks, replay,
+  decryption and isolated restoration for all five scopes.
+
 ## 0.6.15 — 2026-10-11
 
 - Add an independent Window recovery scope that preserves only its canonical

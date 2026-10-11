@@ -200,6 +200,10 @@ func TestGatewayPublisherCreatesOneNamespacePerService(t *testing.T) {
 			return
 		}
 		if request.Method == http.MethodPatch && parts[6] == "upload" {
+			if request.Header.Get("Content-Type") != "application/offset+octet-stream" {
+				http.Error(response, "unsupported chunk media type", http.StatusUnsupportedMediaType)
+				return
+			}
 			body, _ := io.ReadAll(request.Body)
 			if request.Header.Get("Upload-Offset") != fmt.Sprint(len(archives[scope])) || len(body) > 37 {
 				http.Error(response, "incorrect resumed offset or chunk size", http.StatusConflict)

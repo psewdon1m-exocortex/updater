@@ -214,4 +214,10 @@ Updater release path, open an SSH PTY, and run `sudo updater tui`. The daemon
 provides the private socket; starting the UI alone does not upgrade an older
 daemon. Add `--no-color` for monochrome rendering.
 
-Saturn origin resolution uses Updater’s own Kernel Register by default. The normal recovery registration form contains only the service’s setup code. The separate **Advanced: recovery Saturn origin override** action accepts an explicit HTTPS origin. A saved origin is used only when Kernel is unavailable, never after an authorization denial or invalid reachable Register. Restore accepts a key file (empty means this host’s key); old scoped archives use the separate legacy passphrase restore action.
+Saturn origin resolution uses Updater’s own Kernel Register by default. The normal recovery registration form contains only the service’s setup code. Its machine principal requires exactly `services.saturn.sni` and `services.saturn.port` for that lookup; a missing grant returns HTTP 403. The separate **Advanced: recovery Saturn origin override** action accepts an explicit HTTPS origin. A saved origin is used only when Kernel is unavailable, never after an authorization denial or invalid reachable Register. Restore accepts a key file (empty means this host’s key); old scoped archives use the separate legacy passphrase restore action.
+
+A completed **Configure recovery storage** operation proves enrollment only.
+Verify a separate **Create recovery archive** operation reaches COMPLETED and
+Saturn has committed its `.exorecovery` file. HTTP 415 during upload indicates
+an incompatible chunk media type; updating the publisher preserves the existing
+producer identity and recovery key and does not require another setup code.

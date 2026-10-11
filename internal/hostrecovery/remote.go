@@ -217,6 +217,7 @@ func (publisher *gatewayPublisher) publish(ctx context.Context, archive ScopedAr
 			return PublishedArchive{}, err
 		}
 		request.Header.Set("Authorization", "Bearer "+token)
+		request.Header.Set("Content-Type", "application/offset+octet-stream")
 		request.Header.Set("Upload-Offset", fmt.Sprint(offset))
 		request.ContentLength = int64(length)
 		response, err := publisher.client.Do(request)
